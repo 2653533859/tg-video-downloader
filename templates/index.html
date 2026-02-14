@@ -14,6 +14,8 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; b
 .search-box button, .btn { background: #0088cc; color: #fff; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 14px; }
 .btn:hover { background: #006daa; }
 .btn-sm { padding: 4px 10px; font-size: 12px; }
+.btn-outline { background: none; border: 1px solid #555; color: #aaa; }
+.btn-outline:hover { border-color: #00d2ff; color: #00d2ff; background: none; }
 .container { display: flex; height: calc(100vh - 60px); }
 .panel { border-right: 1px solid #222; overflow-y: auto; }
 .panel-dialogs { width: 280px; min-width: 200px; }
@@ -33,12 +35,15 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; b
 .badge-group { background: #1a4a2e; color: #4dff88; }
 .badge-private { background: #3a2a1a; color: #ffaa4d; }
 .badge-reply { background: #3a1a3a; color: #cc88ff; font-size: 10px; margin-left: 6px; }
+.badge-cache { background: #2a3a1a; color: #aacc44; font-size: 10px; margin-left: 8px; }
 .video-toolbar { padding: 10px 16px; background: #161625; border-bottom: 1px solid #222; display: flex; gap: 8px; align-items: center; }
 .video-toolbar label { font-size: 13px; }
 .video-list { padding: 8px; }
-.video-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 8px; margin-bottom: 4px; transition: background .15s; }
+.video-item { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 8px; margin-bottom: 4px; transition: background .15s; }
 .video-item:hover { background: #1a1a2e; }
-.video-item input[type=checkbox] { accent-color: #00d2ff; width: 16px; height: 16px; }
+.video-item input[type=checkbox] { accent-color: #00d2ff; width: 16px; height: 16px; flex-shrink: 0; }
+.video-thumb { width: 96px; height: 54px; border-radius: 4px; object-fit: cover; background: #222; flex-shrink: 0; }
+.video-thumb-placeholder { width: 96px; height: 54px; border-radius: 4px; background: #1a1a2e; flex-shrink: 0; display: flex; align-items: center; justify-content: center; color: #333; font-size: 20px; }
 .video-info { flex: 1; min-width: 0; }
 .video-name { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .video-meta { font-size: 11px; color: #666; margin-top: 3px; display: flex; gap: 12px; flex-wrap: wrap; }
@@ -52,9 +57,13 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; b
 .dl-skipped .dl-bar-fill { background: #f39c12; }
 .empty { text-align: center; color: #555; padding: 40px 20px; font-size: 14px; }
 .loading { text-align: center; padding: 30px; color: #666; }
-.file-item { padding: 8px 16px; border-bottom: 1px solid #1a1a1a; font-size: 12px; }
+.file-item { padding: 8px 16px; border-bottom: 1px solid #1a1a1a; font-size: 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.file-item .file-info { flex: 1; min-width: 0; }
 .file-item .folder { color: #00d2ff; }
 .file-item .meta { color: #666; font-size: 11px; }
+.file-item .fname { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.btn-dl { background: none; border: 1px solid #0088cc; color: #0088cc; padding: 3px 8px; border-radius: 4px; cursor: pointer; font-size: 11px; white-space: nowrap; text-decoration: none; }
+.btn-dl:hover { background: #0088cc; color: #fff; }
 .scan-opts { display: flex; gap: 10px; align-items: center; }
 .scan-opts input[type=number] { width: 60px; background: #2a2a3e; border: 1px solid #444; color: #fff; padding: 4px 8px; border-radius: 4px; font-size: 12px; text-align: center; }
 .scan-opts label { font-size: 12px; cursor: pointer; display: flex; align-items: center; gap: 4px; }
@@ -81,9 +90,10 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; b
     <div class="panel-header">
       <span id="videoTitle">选择一个对话以扫描视频</span>
       <div class="scan-opts">
-        <label>扫描条数</label>
+        <label>条数</label>
         <input id="scanLimit" type="number" value="100" min="10" max="5000">
-        <label><input type="checkbox" id="includeReplies"> 包含评论区</label>
+        <label><input type="checkbox" id="includeReplies"> 含评论</label>
+        <button class="btn btn-sm btn-outline" onclick="scanVideos(true)" title="忽略缓存，重新扫描">重新扫描</button>
       </div>
     </div>
     <div class="video-toolbar" id="videoToolbar" style="display:none">
@@ -130,7 +140,7 @@ function selectDialog(index, name, id) {
   document.querySelectorAll('.dialog-item').forEach((el, i) => el.classList.toggle('active', i === index));
   currentEntity = { dialog_index: index, entity_id: id, source: 'dialog' };
   currentDialogName = name;
-  scanVideos();
+  scanVideos(false);
 }
 
 function doSearch() {
@@ -141,21 +151,27 @@ function doSearch() {
     if (data.error) { alert(data.error); return; }
     currentEntity = { entity_id: data.id, source: 'search' };
     currentDialogName = data.name;
-    scanVideos();
+    scanVideos(false);
   }).catch(e => alert('搜索失败: ' + e));
 }
 
-function scanVideos() {
+function scanVideos(forceRefresh) {
+  if (!currentEntity) return;
   const limit = document.getElementById('scanLimit').value || 100;
   const includeReplies = document.getElementById('includeReplies').checked;
   document.getElementById('videoTitle').textContent = currentDialogName + ' - 扫描中...';
-  document.getElementById('videoList').innerHTML = '<div class="loading">正在扫描视频...' + (includeReplies ? '(含评论区，可能较慢)' : '') + '</div>';
+  document.getElementById('videoList').innerHTML = '<div class="loading">正在扫描视频...' + (includeReplies ? '(含评论区)' : '') + '</div>';
   document.getElementById('videoToolbar').style.display = 'none';
-  const params = new URLSearchParams({ ...currentEntity, limit, include_replies: includeReplies });
+  const params = new URLSearchParams({
+    ...currentEntity, limit,
+    include_replies: includeReplies,
+    refresh: forceRefresh ? 'true' : 'false',
+  });
   fetch('/api/videos?' + params).then(r => r.json()).then(data => {
     if (data.error) { alert(data.error); return; }
-    videos = data;
-    document.getElementById('videoTitle').textContent = `${currentDialogName} (${videos.length} 个视频)`;
+    videos = data.videos;
+    const cacheTag = data.cached ? '<span class="badge badge-cache">缓存</span>' : '';
+    document.getElementById('videoTitle').innerHTML = `${esc(currentDialogName)} (${videos.length} 个视频)${cacheTag}`;
     if (!videos.length) {
       document.getElementById('videoList').innerHTML = '<div class="empty">未找到视频</div>';
       return;
@@ -164,19 +180,25 @@ function scanVideos() {
     document.getElementById('totalCount').textContent = videos.length;
     document.getElementById('selectAll').checked = false;
     updateSelectedCount();
-    const html = videos.map((v, i) => `
+    const html = videos.map((v, i) => {
+      const thumb = v.has_thumb
+        ? `<img class="video-thumb" src="/api/thumb/${v.id}" loading="lazy" onerror="this.outerHTML='<div class=\\'video-thumb-placeholder\\'>&#9654;</div>'">`
+        : '<div class="video-thumb-placeholder">&#9654;</div>';
+      const replyBadge = v.source && v.source !== '主消息' ? '<span class="badge badge-reply">' + esc(v.source) + '</span>' : '';
+      return `
       <div class="video-item">
         <input type="checkbox" class="vcb" data-idx="${i}" onchange="updateSelectedCount()">
+        ${thumb}
         <div class="video-info">
-          <div class="video-name" title="${esc(v.filename)}">${esc(v.filename)}${v.source && v.source !== '主消息' ? '<span class="badge badge-reply">' + esc(v.source) + '</span>' : ''}</div>
+          <div class="video-name" title="${esc(v.filename)}">${esc(v.filename)}${replyBadge}</div>
           <div class="video-meta">
             <span>${v.size_fmt}</span>
             <span>${v.duration_fmt}</span>
             <span>${v.date}</span>
           </div>
         </div>
-      </div>
-    `).join('');
+      </div>`;
+    }).join('');
     document.getElementById('videoList').innerHTML = html;
   }).catch(e => {
     document.getElementById('videoList').innerHTML = `<div class="empty">扫描失败: ${e}</div>`;
@@ -197,11 +219,7 @@ function downloadSelected() {
   const indices = [...document.querySelectorAll('.vcb:checked')].map(cb => +cb.dataset.idx);
   if (!indices.length) { alert('请先选择视频'); return; }
   const msgIds = indices.map(i => videos[i].id);
-  const container = document.getElementById('tabDownloads');
-  indices.forEach(i => {
-    const v = videos[i];
-    addDownloadItem(v.id, v.filename, v.size_fmt);
-  });
+  indices.forEach(i => addDownloadItem(videos[i].id, videos[i].filename, videos[i].size_fmt));
   switchTab('downloads', document.querySelector('.tab'));
   fetch('/api/download', {
     method: 'POST',
@@ -232,30 +250,15 @@ function startProgressPolling() {
   evtSource.onmessage = function(e) {
     const data = JSON.parse(e.data);
     for (const [msgId, info] of Object.entries(data)) {
-      if (msgId === '_complete') {
-        evtSource.close();
-        evtSource = null;
-        loadFiles();
-        return;
-      }
+      if (msgId === '_complete') { evtSource.close(); evtSource = null; loadFiles(); return; }
       const el = document.getElementById('dl-' + msgId);
       if (!el) continue;
       el.querySelector('.dl-bar-fill').style.width = info.progress + '%';
-      if (info.status === 'done') {
-        el.querySelector('.dl-pct').textContent = '完成';
-        el.classList.add('dl-done');
-      } else if (info.status === 'skipped') {
-        el.querySelector('.dl-pct').textContent = '已跳过(文件存在)';
-        el.classList.add('dl-skipped');
-      } else if (info.status === 'error') {
-        el.querySelector('.dl-pct').textContent = '错误: ' + info.error;
-        el.classList.add('dl-error');
-      } else if (info.status === 'downloading') {
-        el.querySelector('.dl-pct').textContent = info.progress + '%';
-        if (info.downloaded) el.querySelector('.dl-size').textContent = info.downloaded + ' / ' + info.total;
-      } else {
-        el.querySelector('.dl-pct').textContent = '等待中';
-      }
+      if (info.status === 'done') { el.querySelector('.dl-pct').textContent = '完成'; el.classList.add('dl-done'); }
+      else if (info.status === 'skipped') { el.querySelector('.dl-pct').textContent = '已跳过(文件存在)'; el.classList.add('dl-skipped'); }
+      else if (info.status === 'error') { el.querySelector('.dl-pct').textContent = '错误: ' + info.error; el.classList.add('dl-error'); }
+      else if (info.status === 'downloading') { el.querySelector('.dl-pct').textContent = info.progress + '%'; if (info.downloaded) el.querySelector('.dl-size').textContent = info.downloaded + ' / ' + info.total; }
+      else { el.querySelector('.dl-pct').textContent = '等待中'; }
     }
   };
   evtSource.onerror = function() { evtSource.close(); evtSource = null; };
@@ -271,25 +274,22 @@ function switchTab(tab, el) {
 
 function loadFiles() {
   fetch('/api/files').then(r => r.json()).then(data => {
-    if (!data.length) {
-      document.getElementById('tabFiles').innerHTML = '<div class="empty">暂无已下载文件</div>';
-      return;
-    }
-    const html = data.map(f => `
-      <div class="file-item">
-        <div><span class="folder">${esc(f.folder)}/</span> ${esc(f.filename)}</div>
-        <div class="meta">${f.size} · ${f.modified}</div>
-      </div>
-    `).join('');
+    if (!data.length) { document.getElementById('tabFiles').innerHTML = '<div class="empty">暂无已下载文件</div>'; return; }
+    const html = data.map(f => {
+      const dlUrl = '/api/file/' + encodeURIComponent(f.folder) + '/' + encodeURIComponent(f.filename);
+      return `<div class="file-item">
+        <div class="file-info">
+          <div class="fname" title="${esc(f.folder)}/${esc(f.filename)}"><span class="folder">${esc(f.folder)}/</span> ${esc(f.filename)}</div>
+          <div class="meta">${f.size} · ${f.modified}</div>
+        </div>
+        <a class="btn-dl" href="${dlUrl}" download="${esc(f.filename)}">下载</a>
+      </div>`;
+    }).join('');
     document.getElementById('tabFiles').innerHTML = html;
   });
 }
 
-function esc(s) {
-  const d = document.createElement('div');
-  d.textContent = s;
-  return d.innerHTML;
-}
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
 loadDialogs();
 </script>

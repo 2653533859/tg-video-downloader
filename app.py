@@ -7,8 +7,9 @@ import asyncio
 import threading
 import time
 import json
+import hashlib
 from datetime import datetime
-from flask import Flask, render_template, jsonify, request, Response, send_from_directory
+from flask import Flask, render_template, jsonify, request, Response, send_from_directory, send_file
 from telethon import TelegramClient
 from telethon.tl.types import (
     MessageMediaDocument,
@@ -23,6 +24,10 @@ tg_loop = asyncio.new_event_loop()
 tg_client = TelegramClient(SESSION_NAME, API_ID, API_HASH, loop=tg_loop)
 
 download_status = {}
+
+# 缩略图缓存目录
+THUMB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".thumbs")
+os.makedirs(THUMB_DIR, exist_ok=True)
 
 
 def run_async(coro):
@@ -47,12 +52,14 @@ def get_video_info(message):
         return None
     if not filename:
         filename = f"video_{message.id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4"
+    has_thumb = bool(doc.thumbs)
     return {
         "id": message.id,
         "filename": filename,
         "size": doc.size,
         "duration": duration,
         "date": message.date.strftime("%Y-%m-%d %H:%M"),
+        "has_thumb": has_thumb,
     }
 
 
@@ -73,6 +80,11 @@ def format_duration(seconds):
 _dialogs_cache = []
 _messages_cache = {}
 _current_entity_cache = {}
+_videos_cache = {}
+
+
+def _make_cache_key(entity_id, limit, include_replies):
+    return f"{entity_id}:{limit}:{include_replies}"
 
 
 @app.route("/")
@@ -118,6 +130,7 @@ def api_videos():
     source = request.args.get("source", "dialog")
     limit = request.args.get("limit", 100, type=int)
     include_replies = request.args.get("include_replies", "false") == "true"
+    refresh = request.args.get("refresh", "false") == "true"
 
     try:
         if source == "search" and "search_entity" in _current_entity_cache:
@@ -135,8 +148,16 @@ def api_videos():
         _current_entity_cache["entity"] = entity
         _current_entity_cache["name"] = name
 
+        eid = getattr(entity, "id", entity_id)
+        cache_key = _make_cache_key(eid, limit, include_replies)
+        if not refresh and cache_key in _videos_cache:
+            cached = _videos_cache[cache_key]
+            return jsonify({"videos": cached["videos"], "cached": True})
+
         async def scan():
             videos = []
+            posts_with_replies = []
+
             async for message in tg_client.iter_messages(entity, limit=limit):
                 info = get_video_info(message)
                 if info:
@@ -145,24 +166,64 @@ def api_videos():
                     info["duration_fmt"] = format_duration(info["duration"])
                     info["source"] = "主消息"
                     videos.append(info)
-
                 if include_replies and message.replies and message.replies.replies > 0:
-                    try:
-                        async for reply in tg_client.iter_messages(entity, reply_to=message.id, limit=200):
-                            rinfo = get_video_info(reply)
-                            if rinfo:
-                                _messages_cache[reply.id] = reply
-                                rinfo["size_fmt"] = format_size(rinfo["size"])
-                                rinfo["duration_fmt"] = format_duration(rinfo["duration"])
-                                rinfo["source"] = f"评论@帖子{message.id}"
-                                videos.append(rinfo)
-                    except Exception:
-                        pass
+                    posts_with_replies.append(message)
+
+            if posts_with_replies:
+                sem = asyncio.Semaphore(5)
+
+                async def scan_replies(post):
+                    reply_videos = []
+                    async with sem:
+                        try:
+                            async for reply in tg_client.iter_messages(entity, reply_to=post.id, limit=200):
+                                rinfo = get_video_info(reply)
+                                if rinfo:
+                                    _messages_cache[reply.id] = reply
+                                    rinfo["size_fmt"] = format_size(rinfo["size"])
+                                    rinfo["duration_fmt"] = format_duration(rinfo["duration"])
+                                    rinfo["source"] = f"评论@帖子{post.id}"
+                                    reply_videos.append(rinfo)
+                        except Exception:
+                            pass
+                    return reply_videos
+
+                tasks = [scan_replies(post) for post in posts_with_replies]
+                results = await asyncio.gather(*tasks)
+                for batch in results:
+                    videos.extend(batch)
+
             return videos
 
-        return jsonify(run_async(scan()))
+        videos = run_async(scan())
+        _videos_cache[cache_key] = {"videos": videos, "time": time.time()}
+        return jsonify({"videos": videos, "cached": False})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/thumb/<int:msg_id>")
+def api_thumb(msg_id):
+    """获取视频缩略图"""
+    # 先检查磁盘缓存
+    thumb_path = os.path.join(THUMB_DIR, f"{msg_id}.jpg")
+    if os.path.exists(thumb_path):
+        return send_file(thumb_path, mimetype="image/jpeg")
+
+    message = _messages_cache.get(msg_id)
+    if not message:
+        return Response(status=404)
+
+    try:
+        data = run_async(tg_client.download_media(message, file=bytes, thumb=-1))
+        if not data:
+            return Response(status=404)
+        # 缓存到磁盘
+        with open(thumb_path, "wb") as f:
+            f.write(data)
+        return Response(data, mimetype="image/jpeg")
+    except Exception:
+        return Response(status=404)
 
 
 @app.route("/api/download", methods=["POST"])
@@ -286,11 +347,8 @@ def api_files():
 
 @app.route("/api/file/<path:filepath>")
 def api_file_download(filepath):
-    """下载已保存的文件到浏览器"""
-    # filepath 格式: folder/filename
     full_path = os.path.join(DOWNLOAD_DIR, filepath)
     full_path = os.path.realpath(full_path)
-    # 安全检查：确保路径在 DOWNLOAD_DIR 内
     if not full_path.startswith(os.path.realpath(DOWNLOAD_DIR)):
         return jsonify({"error": "非法路径"}), 403
     directory = os.path.dirname(full_path)
