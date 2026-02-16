@@ -5,106 +5,199 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>TG 视频下载器</title>
 <style>
+:root { --bg: #0f0f0f; --panel: #161625; --border: #222; --accent: #00d2ff; --accent2: #0088cc; --text: #e0e0e0; --dim: #666; }
 * { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0f0f0f; color: #e0e0e0; min-height: 100vh; }
-.header { background: #1a1a2e; padding: 16px 24px; display: flex; align-items: center; gap: 16px; border-bottom: 1px solid #333; }
-.header h1 { font-size: 20px; color: #00d2ff; }
-.search-box { display: flex; gap: 8px; margin-left: auto; }
-.search-box input { background: #2a2a3e; border: 1px solid #444; color: #fff; padding: 8px 14px; border-radius: 6px; width: 280px; font-size: 14px; }
-.search-box button, .btn { background: #0088cc; color: #fff; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 14px; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+/* Header */
+.header { background: #1a1a2e; padding: 12px 20px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #333; flex-wrap: wrap; }
+.header h1 { font-size: 18px; color: var(--accent); white-space: nowrap; }
+.conn-status { font-size: 11px; padding: 3px 8px; border-radius: 10px; display: flex; align-items: center; gap: 4px; }
+.conn-status .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+.conn-ok { background: #1a3a1a; color: #4dff88; }
+.conn-ok .dot { background: #4dff88; }
+.conn-err { background: #3a1a1a; color: #ff6b6b; }
+.conn-err .dot { background: #ff6b6b; animation: blink 1.2s infinite; }
+.conn-loading { background: #2a2a1a; color: #ffcc44; }
+.conn-loading .dot { background: #ffcc44; animation: blink 0.8s infinite; }
+@keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+.search-box { display: flex; gap: 6px; margin-left: auto; }
+.search-box input { background: #2a2a3e; border: 1px solid #444; color: #fff; padding: 7px 12px; border-radius: 6px; width: 240px; font-size: 13px; }
+.search-box button, .btn { background: var(--accent2); color: #fff; border: none; padding: 7px 14px; border-radius: 6px; cursor: pointer; font-size: 13px; }
 .btn:hover { background: #006daa; }
 .btn-sm { padding: 4px 10px; font-size: 12px; }
 .btn-outline { background: none; border: 1px solid #555; color: #aaa; }
-.btn-outline:hover { border-color: #00d2ff; color: #00d2ff; background: none; }
-.container { display: flex; height: calc(100vh - 60px); }
-.panel { border-right: 1px solid #222; overflow-y: auto; }
-.panel-dialogs { width: 280px; min-width: 200px; }
-.panel-videos { flex: 1; }
-.panel-downloads { width: 320px; min-width: 260px; border-right: none; }
-.panel-header { padding: 12px 16px; background: #161625; border-bottom: 1px solid #222; font-size: 14px; font-weight: 600; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
-.tabs { display: flex; gap: 0; }
-.tab { padding: 8px 16px; cursor: pointer; font-size: 13px; border-bottom: 2px solid transparent; color: #888; }
-.tab.active { color: #00d2ff; border-bottom-color: #00d2ff; }
-.dialog-item { padding: 10px 16px; border-bottom: 1px solid #1a1a1a; cursor: pointer; transition: background .15s; }
+.btn-outline:hover { border-color: var(--accent); color: var(--accent); background: none; }
+.btn-danger { background: #c0392b; }
+.btn-danger:hover { background: #e74c3c; }
+.btn-retry { background: #2980b9; }
+
+/* Layout */
+.container { display: flex; height: calc(100vh - 52px); }
+.panel { border-right: 1px solid var(--border); overflow-y: auto; }
+.panel-dialogs { width: 260px; }
+.panel-videos { flex: 1; min-width: 0; }
+.panel-downloads { width: 320px; border-right: none; }
+.panel-header { padding: 10px 14px; background: var(--panel); border-bottom: 1px solid var(--border); font-size: 13px; font-weight: 600; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; }
+
+/* Tabs */
+.tabs { display: flex; }
+.tab { padding: 8px 14px; cursor: pointer; font-size: 13px; border-bottom: 2px solid transparent; color: #888; }
+.tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+/* Dialogs */
+.dialog-item { padding: 9px 14px; border-bottom: 1px solid #1a1a1a; cursor: pointer; transition: background .15s; }
 .dialog-item:hover { background: #1a1a2e; }
-.dialog-item.active { background: #1a1a3e; border-left: 3px solid #00d2ff; }
-.dialog-name { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.dialog-type { font-size: 11px; color: #666; margin-top: 2px; }
+.dialog-item.active { background: #1a1a3e; border-left: 3px solid var(--accent); }
+.dialog-name { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dialog-type { font-size: 11px; color: var(--dim); margin-top: 2px; }
+
+/* Badges */
 .badge { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 10px; }
 .badge-channel { background: #1a3a5c; color: #4da6ff; }
 .badge-group { background: #1a4a2e; color: #4dff88; }
 .badge-private { background: #3a2a1a; color: #ffaa4d; }
 .badge-reply { background: #3a1a3a; color: #cc88ff; font-size: 10px; margin-left: 6px; }
 .badge-cache { background: #2a3a1a; color: #aacc44; font-size: 10px; margin-left: 8px; }
-.video-toolbar { padding: 10px 16px; background: #161625; border-bottom: 1px solid #222; display: flex; gap: 8px; align-items: center; }
-.video-toolbar label { font-size: 13px; }
-.video-list { padding: 8px; }
-.video-item { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 8px; margin-bottom: 4px; transition: background .15s; }
+
+/* Video filter bar */
+.filter-bar { padding: 8px 14px; background: #111; border-bottom: 1px solid var(--border); display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.filter-bar input[type=text] { background: #1a1a2e; border: 1px solid #333; color: #ccc; padding: 4px 8px; border-radius: 4px; font-size: 12px; width: 140px; }
+.filter-bar select { background: #1a1a2e; border: 1px solid #333; color: #ccc; padding: 4px 6px; border-radius: 4px; font-size: 12px; }
+.filter-bar label { font-size: 11px; color: var(--dim); }
+
+/* Video toolbar */
+.video-toolbar { padding: 8px 14px; background: var(--panel); border-bottom: 1px solid var(--border); display: flex; gap: 8px; align-items: center; font-size: 13px; }
+.selected-info { color: var(--accent); font-size: 12px; margin-left: 8px; }
+
+/* Video list */
+.video-list { padding: 6px; }
+.video-item { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 6px; margin-bottom: 3px; transition: background .15s; }
 .video-item:hover { background: #1a1a2e; }
-.video-item input[type=checkbox] { accent-color: #00d2ff; width: 16px; height: 16px; flex-shrink: 0; }
-.video-thumb { width: 96px; height: 54px; border-radius: 4px; object-fit: cover; background: #222; flex-shrink: 0; }
-.video-thumb-placeholder { width: 96px; height: 54px; border-radius: 4px; background: #1a1a2e; flex-shrink: 0; display: flex; align-items: center; justify-content: center; color: #333; font-size: 20px; }
+.video-item input[type=checkbox] { accent-color: var(--accent); width: 15px; height: 15px; flex-shrink: 0; }
+.video-thumb { width: 88px; height: 50px; border-radius: 4px; object-fit: cover; background: #222; flex-shrink: 0; cursor: pointer; }
+.video-thumb-placeholder { width: 88px; height: 50px; border-radius: 4px; background: #1a1a2e; flex-shrink: 0; display: flex; align-items: center; justify-content: center; color: #333; font-size: 18px; }
 .video-info { flex: 1; min-width: 0; }
-.video-name { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.video-meta { font-size: 11px; color: #666; margin-top: 3px; display: flex; gap: 12px; flex-wrap: wrap; }
-.dl-item { padding: 10px 16px; border-bottom: 1px solid #1a1a1a; }
-.dl-name { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 6px; }
-.dl-bar { height: 6px; background: #222; border-radius: 3px; overflow: hidden; }
-.dl-bar-fill { height: 100%; background: linear-gradient(90deg, #0088cc, #00d2ff); border-radius: 3px; transition: width .3s; }
-.dl-status { font-size: 11px; color: #666; margin-top: 4px; display: flex; justify-content: space-between; }
+.video-name { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.video-meta { font-size: 11px; color: var(--dim); margin-top: 2px; display: flex; gap: 10px; flex-wrap: wrap; }
+
+/* Download items */
+.dl-item { padding: 9px 14px; border-bottom: 1px solid #1a1a1a; }
+.dl-top { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; }
+.dl-name { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; }
+.dl-actions { display: flex; gap: 4px; flex-shrink: 0; }
+.dl-actions button { padding: 2px 6px; font-size: 10px; border-radius: 3px; cursor: pointer; border: none; color: #fff; }
+.dl-bar { height: 5px; background: #222; border-radius: 3px; overflow: hidden; }
+.dl-bar-fill { height: 100%; background: linear-gradient(90deg, var(--accent2), var(--accent)); border-radius: 3px; transition: width .3s; }
+.dl-status { font-size: 11px; color: var(--dim); margin-top: 3px; display: flex; justify-content: space-between; }
+.dl-speed { color: #2ecc71; }
 .dl-done .dl-bar-fill { background: #2ecc71; }
-.dl-error .dl-bar-fill { background: #e74c3c; }
+.dl-error .dl-bar-fill, .dl-cancelled .dl-bar-fill { background: #e74c3c; }
 .dl-skipped .dl-bar-fill { background: #f39c12; }
-.empty { text-align: center; color: #555; padding: 40px 20px; font-size: 14px; }
-.loading { text-align: center; padding: 30px; color: #666; }
-.file-item { padding: 8px 16px; border-bottom: 1px solid #1a1a1a; font-size: 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+
+/* Files */
+.file-item { padding: 8px 14px; border-bottom: 1px solid #1a1a1a; font-size: 12px; display: flex; align-items: center; justify-content: space-between; gap: 6px; }
 .file-item .file-info { flex: 1; min-width: 0; }
-.file-item .folder { color: #00d2ff; }
-.file-item .meta { color: #666; font-size: 11px; }
-.file-item .fname { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.btn-dl { background: none; border: 1px solid #0088cc; color: #0088cc; padding: 3px 8px; border-radius: 4px; cursor: pointer; font-size: 11px; white-space: nowrap; text-decoration: none; }
-.btn-dl:hover { background: #0088cc; color: #fff; }
-.scan-opts { display: flex; gap: 10px; align-items: center; }
-.scan-opts input[type=number] { width: 60px; background: #2a2a3e; border: 1px solid #444; color: #fff; padding: 4px 8px; border-radius: 4px; font-size: 12px; text-align: center; }
-.scan-opts label { font-size: 12px; cursor: pointer; display: flex; align-items: center; gap: 4px; }
-.scan-opts input[type=checkbox] { accent-color: #00d2ff; }
+.file-item .folder { color: var(--accent); }
+.file-item .meta { color: var(--dim); font-size: 11px; }
+.file-item .fname { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.file-item .fname:hover { color: var(--accent); }
+.file-btns { display: flex; gap: 4px; flex-shrink: 0; }
+.btn-dl { background: none; border: 1px solid var(--accent2); color: var(--accent2); padding: 3px 8px; border-radius: 4px; cursor: pointer; font-size: 11px; white-space: nowrap; text-decoration: none; }
+.btn-dl:hover { background: var(--accent2); color: #fff; }
+
+/* Modal */
+.modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,.85); z-index: 1000; display: flex; align-items: center; justify-content: center; }
+.modal-overlay.hidden { display: none; }
+.modal-content { position: relative; max-width: 90vw; max-height: 90vh; }
+.modal-content video { max-width: 90vw; max-height: 85vh; border-radius: 8px; background: #000; }
+.modal-close { position: absolute; top: -32px; right: 0; color: #fff; font-size: 24px; cursor: pointer; background: none; border: none; }
+.modal-title { color: #ccc; font-size: 13px; margin-top: 6px; text-align: center; max-width: 90vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Misc */
+.empty { text-align: center; color: #555; padding: 40px 20px; font-size: 14px; }
+.loading { text-align: center; padding: 30px; color: var(--dim); }
+.scan-opts { display: flex; gap: 8px; align-items: center; }
+.scan-opts input[type=number] { width: 55px; background: #2a2a3e; border: 1px solid #444; color: #fff; padding: 4px 6px; border-radius: 4px; font-size: 12px; text-align: center; }
+.scan-opts label { font-size: 12px; cursor: pointer; display: flex; align-items: center; gap: 3px; }
+.scan-opts input[type=checkbox] { accent-color: var(--accent); }
+
+/* Mobile */
+@media (max-width: 900px) {
+  .container { flex-direction: column; height: auto; }
+  .panel-dialogs, .panel-videos, .panel-downloads { width: 100%; border-right: none; border-bottom: 1px solid var(--border); }
+  .panel-dialogs { max-height: 200px; }
+  .panel-videos { min-height: 400px; }
+  .panel-downloads { min-height: 300px; }
+  .search-box input { width: 160px; }
+  .header { padding: 10px 12px; }
+  .video-thumb, .video-thumb-placeholder { width: 64px; height: 36px; }
+}
+@media (max-width: 600px) {
+  .header h1 { font-size: 15px; }
+  .search-box { width: 100%; }
+  .search-box input { flex: 1; width: auto; }
+  .scan-opts { flex-wrap: wrap; }
+  .filter-bar { flex-wrap: wrap; }
+  .video-thumb, .video-thumb-placeholder { width: 56px; height: 32px; }
+}
 </style>
 </head>
 <body>
 <div class="header">
   <h1>TG 视频下载器</h1>
+  <div class="conn-status conn-loading" id="connStatus"><span class="dot"></span> 连接中...</div>
   <div class="search-box">
-    <input id="searchInput" placeholder="频道链接或用户名，如 @channel" onkeydown="if(event.key==='Enter')doSearch()">
+    <input id="searchInput" placeholder="频道链接或 @用户名" onkeydown="if(event.key==='Enter')doSearch()">
     <button onclick="doSearch()">搜索</button>
   </div>
 </div>
 <div class="container">
+  <!-- 左：对话列表 -->
   <div class="panel panel-dialogs">
-    <div class="panel-header">
-      对话列表
-      <button class="btn btn-sm" onclick="loadDialogs()">刷新</button>
+    <div class="panel-header">对话列表 <button class="btn btn-sm" onclick="loadDialogs()">刷新</button></div>
+    <div class="filter-bar">
+      <input type="text" id="dialogSearch" placeholder="搜索对话名称..." oninput="filterDialogs()" style="width: 100%;">
     </div>
-    <div id="dialogList"><div class="loading">加载中...</div></div>
+    <div id="dialogList"><div class="loading">等待连接...</div></div>
   </div>
+  <!-- 中：视频列表 -->
   <div class="panel panel-videos">
     <div class="panel-header">
-      <span id="videoTitle">选择一个对话以扫描视频</span>
+      <span id="videoTitle">选择对话以扫描视频</span>
       <div class="scan-opts">
         <label>条数</label>
         <input id="scanLimit" type="number" value="100" min="10" max="5000">
         <label><input type="checkbox" id="includeReplies"> 含评论</label>
-        <button class="btn btn-sm btn-outline" onclick="scanVideos(true)" title="忽略缓存，重新扫描">重新扫描</button>
+        <button class="btn btn-sm btn-outline" onclick="scanVideos(true)">重新扫描</button>
       </div>
+    </div>
+    <!-- 筛选/排序栏 -->
+    <div class="filter-bar" id="filterBar" style="display:none">
+      <input type="text" id="filterText" placeholder="搜索文件名..." oninput="applyFilter()">
+      <label>排序</label>
+      <select id="sortBy" onchange="applyFilter()">
+        <option value="default">默认</option>
+        <option value="size_desc">大小 ↓</option>
+        <option value="size_asc">大小 ↑</option>
+        <option value="duration_desc">时长 ↓</option>
+        <option value="duration_asc">时长 ↑</option>
+        <option value="date_desc">日期 ↓</option>
+        <option value="date_asc">日期 ↑</option>
+        <option value="name_asc">文件名 A-Z</option>
+      </select>
     </div>
     <div class="video-toolbar" id="videoToolbar" style="display:none">
       <input type="checkbox" id="selectAll" onchange="toggleSelectAll()">
-      <label for="selectAll" style="flex:1">全选 (<span id="selectedCount">0</span>/<span id="totalCount">0</span>)</label>
-      <button class="btn btn-sm" onclick="downloadSelected()">下载选中</button>
+      <label for="selectAll">全选 (<span id="selectedCount">0</span>/<span id="totalCount">0</span>)</label>
+      <span class="selected-info" id="selectedInfo"></span>
+      <button class="btn btn-sm" onclick="downloadSelected()" style="margin-left:auto">下载选中</button>
     </div>
     <div id="videoList"><div class="empty">请从左侧选择对话，或搜索频道</div></div>
   </div>
+  <!-- 右：下载/文件 -->
   <div class="panel panel-downloads">
-    <div class="tabs" style="background:#161625;border-bottom:1px solid #222">
+    <div class="tabs" style="background:var(--panel);border-bottom:1px solid var(--border)">
       <div class="tab active" onclick="switchTab('downloads',this)">下载任务</div>
       <div class="tab" onclick="switchTab('files',this)">已下载文件</div>
     </div>
@@ -113,31 +206,89 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; b
   </div>
 </div>
 
+<!-- 视频预览弹窗 -->
+<div class="modal-overlay hidden" id="previewModal" onclick="closePreview(event)">
+  <div class="modal-content">
+    <button class="modal-close" onclick="closePreview()">&times;</button>
+    <video id="previewVideo" controls autoplay></video>
+    <div class="modal-title" id="previewTitle"></div>
+  </div>
+</div>
+
 <script>
 let currentEntity = null;
 let currentDialogName = '';
+let allDialogs = [];
 let videos = [];
+let filteredVideos = [];
 let evtSource = null;
+let statusTimer = null;
+let isConnected = false;
+let selectedIds = new Set();
+
+// 连接状态检查
+function checkStatus() {
+  fetch('/api/status').then(r => r.json()).then(data => {
+    const el = document.getElementById('connStatus');
+    if (data.connected) {
+      el.className = 'conn-status conn-ok';
+      el.innerHTML = '<span class="dot"></span> ' + esc(data.user);
+      if (!isConnected) {
+        isConnected = true;
+        loadDialogs();  // 连接成功后自动加载对话
+      }
+    } else {
+      el.className = 'conn-status conn-err';
+      el.innerHTML = '<span class="dot"></span> ' + esc(data.error || '未连接');
+      isConnected = false;
+      document.getElementById('dialogList').innerHTML = '<div class="empty">' + esc(data.error || 'Telegram 未连接') + '</div>';
+    }
+  }).catch(() => {
+    const el = document.getElementById('connStatus');
+    el.className = 'conn-status conn-err';
+    el.innerHTML = '<span class="dot"></span> 服务不可用';
+    isConnected = false;
+  });
+}
+
+// 启动时立即检查，之后每5秒检查一次
+checkStatus();
+statusTimer = setInterval(checkStatus, 5000);
 
 function loadDialogs() {
   document.getElementById('dialogList').innerHTML = '<div class="loading">加载中...</div>';
   fetch('/api/dialogs').then(r => r.json()).then(data => {
-    if (data.error) { alert(data.error); return; }
-    const html = data.map(d => {
-      const bc = d.type === '频道' ? 'badge-channel' : d.type === '群组' ? 'badge-group' : 'badge-private';
-      return `<div class="dialog-item" onclick="selectDialog(${d.index}, '${esc(d.name)}', ${d.id})">
-        <div class="dialog-name">${esc(d.name)}</div>
-        <div class="dialog-type"><span class="badge ${bc}">${d.type}</span> ID: ${d.id}</div>
-      </div>`;
-    }).join('');
-    document.getElementById('dialogList').innerHTML = html || '<div class="empty">无对话</div>';
+    if (data.error) {
+      document.getElementById('dialogList').innerHTML = '<div class="empty">' + esc(data.error) + '</div>';
+      return;
+    }
+    allDialogs = data;
+    filterDialogs();
   }).catch(e => {
-    document.getElementById('dialogList').innerHTML = `<div class="empty">加载失败: ${e}</div>`;
+    document.getElementById('dialogList').innerHTML = '<div class="empty">加载失败，请检查连接</div>';
   });
 }
 
-function selectDialog(index, name, id) {
-  document.querySelectorAll('.dialog-item').forEach((el, i) => el.classList.toggle('active', i === index));
+function filterDialogs() {
+  const q = document.getElementById('dialogSearch').value.toLowerCase();
+  const filtered = allDialogs.filter(d => d.name.toLowerCase().includes(q));
+  renderDialogs(filtered);
+}
+
+function renderDialogs(data) {
+  const html = data.map(d => {
+    const bc = d.type==='频道'?'badge-channel':d.type==='群组'?'badge-group':'badge-private';
+    const active = currentEntity && currentEntity.dialog_index === d.index ? 'active' : '';
+    return `<div class="dialog-item ${active}" onclick="selectDialog(${d.index},'${esc(d.name)}',${d.id}, this)">
+      <div class="dialog-name">${esc(d.name)}</div>
+      <div class="dialog-type"><span class="badge ${bc}">${d.type}</span></div>
+    </div>`;
+  }).join('');
+  document.getElementById('dialogList').innerHTML = html || '<div class="empty">未找到对话</div>';
+}
+function selectDialog(index, name, id, el) {
+  document.querySelectorAll('.dialog-item').forEach(item => item.classList.remove('active'));
+  if (el) el.classList.add('active');
   currentEntity = { dialog_index: index, entity_id: id, source: 'dialog' };
   currentDialogName = name;
   scanVideos(false);
@@ -147,101 +298,233 @@ function doSearch() {
   const q = document.getElementById('searchInput').value.trim();
   if (!q) return;
   document.getElementById('videoList').innerHTML = '<div class="loading">搜索中...</div>';
-  fetch('/api/search?q=' + encodeURIComponent(q)).then(r => r.json()).then(data => {
+  fetch('/api/search?q='+encodeURIComponent(q)).then(r=>r.json()).then(data => {
     if (data.error) { alert(data.error); return; }
     currentEntity = { entity_id: data.id, source: 'search' };
     currentDialogName = data.name;
     scanVideos(false);
-  }).catch(e => alert('搜索失败: ' + e));
+  }).catch(e => alert('搜索失败'));
 }
 
+let scanningReplies = false;
 function scanVideos(forceRefresh) {
   if (!currentEntity) return;
   const limit = document.getElementById('scanLimit').value || 100;
-  const includeReplies = document.getElementById('includeReplies').checked;
+  const ir = document.getElementById('includeReplies').checked;
   document.getElementById('videoTitle').textContent = currentDialogName + ' - 扫描中...';
-  document.getElementById('videoList').innerHTML = '<div class="loading">正在扫描视频...' + (includeReplies ? '(含评论区)' : '') + '</div>';
+  document.getElementById('videoList').innerHTML = '<div class="loading">正在扫描主页视频...</div>';
   document.getElementById('videoToolbar').style.display = 'none';
-  const params = new URLSearchParams({
-    ...currentEntity, limit,
-    include_replies: includeReplies,
-    refresh: forceRefresh ? 'true' : 'false',
-  });
-  fetch('/api/videos?' + params).then(r => r.json()).then(data => {
-    if (data.error) { alert(data.error); return; }
-    videos = data.videos;
-    const cacheTag = data.cached ? '<span class="badge badge-cache">缓存</span>' : '';
-    document.getElementById('videoTitle').innerHTML = `${esc(currentDialogName)} (${videos.length} 个视频)${cacheTag}`;
-    if (!videos.length) {
-      document.getElementById('videoList').innerHTML = '<div class="empty">未找到视频</div>';
+  document.getElementById('filterBar').style.display = 'none';
+  scanningReplies = false; selectedIds.clear(); updateSelectedCount();
+
+  const params = new URLSearchParams({...currentEntity, limit, include_replies: ir, refresh: forceRefresh?'true':'false'});
+  fetch('/api/videos?'+params).then(r=>r.json()).then(data => {
+    if (data.error) {
+      document.getElementById('videoTitle').textContent = currentDialogName;
+      document.getElementById('videoList').innerHTML = '<div class="empty">' + esc(data.error) + '</div>';
       return;
     }
-    document.getElementById('videoToolbar').style.display = 'flex';
-    document.getElementById('totalCount').textContent = videos.length;
-    document.getElementById('selectAll').checked = false;
-    updateSelectedCount();
-    const html = videos.map((v, i) => {
-      const thumb = v.has_thumb
-        ? `<img class="video-thumb" src="/api/thumb/${v.id}" loading="lazy" onerror="this.outerHTML='<div class=\\'video-thumb-placeholder\\'>&#9654;</div>'">`
-        : '<div class="video-thumb-placeholder">&#9654;</div>';
-      const replyBadge = v.source && v.source !== '主消息' ? '<span class="badge badge-reply">' + esc(v.source) + '</span>' : '';
-      return `
-      <div class="video-item">
-        <input type="checkbox" class="vcb" data-idx="${i}" onchange="updateSelectedCount()">
-        ${thumb}
-        <div class="video-info">
-          <div class="video-name" title="${esc(v.filename)}">${esc(v.filename)}${replyBadge}</div>
-          <div class="video-meta">
-            <span>${v.size_fmt}</span>
-            <span>${v.duration_fmt}</span>
-            <span>${v.date}</span>
-          </div>
-        </div>
-      </div>`;
-    }).join('');
-    document.getElementById('videoList').innerHTML = html;
+    videos = data.videos;
+    const cacheTag = data.cached ? '<span class="badge badge-cache">缓存</span>' : '';
+    updateVideoTitle(cacheTag);
+    
+    if (videos.length > 0) {
+      document.getElementById('filterBar').style.display = 'flex';
+      document.getElementById('videoToolbar').style.display = 'flex';
+      document.getElementById('filterText').value = '';
+      document.getElementById('sortBy').value = 'default';
+      applyFilter();
+    } else if (!data.posts_with_replies || data.posts_with_replies.length === 0) {
+      document.getElementById('videoList').innerHTML = '<div class="empty">未找到视频</div>';
+    }
+
+    if (ir && data.posts_with_replies && data.posts_with_replies.length > 0) {
+        scanRepliesSequentially(data.posts_with_replies, data.entity_id || currentEntity.entity_id, cacheTag);
+    }
   }).catch(e => {
-    document.getElementById('videoList').innerHTML = `<div class="empty">扫描失败: ${e}</div>`;
+    document.getElementById('videoList').innerHTML = '<div class="empty">扫描失败，请检查连接</div>';
   });
+}
+
+function updateVideoTitle(extra = '') {
+    document.getElementById('videoTitle').innerHTML = `${esc(currentDialogName)} (${videos.length} 个视频) ${extra}`;
+}
+
+async function scanRepliesSequentially(posts, entityId, cacheTag) {
+    scanningReplies = true;
+    let count = 0;
+    const total = posts.length;
+    
+    const statusToast = document.createElement('span');
+    statusToast.style = "font-size:11px; color:var(--accent); margin-left:10px;";
+    document.getElementById('videoTitle').appendChild(statusToast);
+
+    // 分批处理，避免请求过多
+    for (let i = 0; i < posts.length; i += 2) {
+        if (!scanningReplies) break;
+        const chunk = posts.slice(i, i + 2);
+        count += chunk.length;
+        statusToast.textContent = `(正在扫描评论区: ${count}/${total})`;
+        
+        try {
+            const results = await Promise.all(chunk.map(post => 
+                fetch(`/api/replies?entity_id=${entityId}&post_id=${post.id}`).then(r => r.json()).catch(() => ({videos:[]}))
+            ));
+
+            let newVideosFound = false;
+            results.forEach(res => {
+                if (res.videos && res.videos.length > 0) {
+                    res.videos.forEach(nv => {
+                        if (!videos.find(v => v.id === nv.id)) {
+                            videos.push(nv);
+                            newVideosFound = true;
+                        }
+                    });
+                }
+            });
+
+            if (newVideosFound) {
+                updateVideoTitle(cacheTag);
+                document.getElementById('videoTitle').appendChild(statusToast);
+                applyFilter();
+            }
+        } catch(e) {}
+    }
+    if (scanningReplies) {
+        statusToast.textContent = '(评论区扫描完成)';
+        setTimeout(() => { if(statusToast.parentNode) statusToast.remove(); }, 3000);
+    }
+}
+
+function applyFilter() {
+  const keyword = document.getElementById('filterText').value.toLowerCase();
+  const sortBy = document.getElementById('sortBy').value;
+  filteredVideos = videos.filter(v => !keyword || v.filename.toLowerCase().includes(keyword));
+  if (sortBy === 'size_desc') filteredVideos.sort((a,b) => b.size - a.size);
+  else if (sortBy === 'size_asc') filteredVideos.sort((a,b) => a.size - b.size);
+  else if (sortBy === 'duration_desc') filteredVideos.sort((a,b) => b.duration - a.duration);
+  else if (sortBy === 'duration_asc') filteredVideos.sort((a,b) => a.duration - b.duration);
+  else if (sortBy === 'date_desc') filteredVideos.sort((a,b) => b.date > a.date ? 1 : -1);
+  else if (sortBy === 'date_asc') filteredVideos.sort((a,b) => a.date > b.date ? 1 : -1);
+  else if (sortBy === 'name_asc') filteredVideos.sort((a,b) => a.filename.localeCompare(b.filename));
+
+  document.getElementById('totalCount').textContent = filteredVideos.length;
+  document.getElementById('selectAll').checked = false;
+  renderVideoList();
+  updateSelectedCount();
+}
+
+function renderVideoList() {
+  const html = filteredVideos.map((v, i) => {
+    const thumb = v.has_thumb
+      ? `<img class="video-thumb" src="/api/thumb/${v.id}" loading="lazy" onclick="previewByThumb(${v.id})" onerror="this.outerHTML='<div class=\'video-thumb-placeholder\'>&#9654;</div>'">`
+      : '<div class="video-thumb-placeholder">&#9654;</div>';
+    const rb = v.source && v.source !== '主消息' ? '<span class="badge badge-reply">'+esc(v.source)+'</span>' : '';
+    const isChecked = selectedIds.has(v.id) ? 'checked' : '';
+    return `<div class="video-item">
+      <input type="checkbox" class="vcb" data-id="${v.id}" data-size="${v.size}" ${isChecked} onchange="handleCbChange(this)">
+      ${thumb}
+      <div class="video-info">
+        <div class="video-name" title="${esc(v.filename)}">${esc(v.filename)}${rb}</div>
+        <div class="video-meta"><span>${v.size_fmt}</span><span>${v.duration_fmt}</span><span>${v.date}</span></div>
+      </div>
+    </div>`;
+  }).join('');
+  document.getElementById('videoList').innerHTML = html || '<div class="empty">无匹配视频</div>';
+}
+
+function handleCbChange(cb) {
+    const id = parseInt(cb.dataset.id);
+    if (cb.checked) selectedIds.add(id);
+    else selectedIds.delete(id);
+    updateSelectedCount();
 }
 
 function toggleSelectAll() {
   const checked = document.getElementById('selectAll').checked;
-  document.querySelectorAll('.vcb').forEach(cb => cb.checked = checked);
+  filteredVideos.forEach(v => {
+      if (checked) selectedIds.add(v.id);
+      else selectedIds.delete(v.id);
+  });
+  renderVideoList();
   updateSelectedCount();
 }
 
 function updateSelectedCount() {
-  document.getElementById('selectedCount').textContent = document.querySelectorAll('.vcb:checked').length;
+  const count = selectedIds.size;
+  let totalBytes = 0;
+  videos.forEach(v => {
+      if (selectedIds.has(v.id)) totalBytes += v.size;
+  });
+  document.getElementById('selectedCount').textContent = count;
+  document.getElementById('selectedInfo').textContent = count ? `已选 ${fmtSize(totalBytes)}` : '';
+}
+
+function fmtSize(b) {
+  for (const u of ['B','KB','MB','GB']) { if (b < 1024) return b.toFixed(1)+u; b /= 1024; }
+  return b.toFixed(1)+'TB';
 }
 
 function downloadSelected() {
-  const indices = [...document.querySelectorAll('.vcb:checked')].map(cb => +cb.dataset.idx);
-  if (!indices.length) { alert('请先选择视频'); return; }
-  const msgIds = indices.map(i => videos[i].id);
-  indices.forEach(i => addDownloadItem(videos[i].id, videos[i].filename, videos[i].size_fmt));
+  if (!selectedIds.size) { alert('请先选择视频'); return; }
+  const msgIds = [...selectedIds];
+  const selected = videos.filter(v => selectedIds.has(v.id));
+  selected.forEach(v => addDownloadItem(v.id, v.filename, v.size_fmt));
   switchTab('downloads', document.querySelector('.tab'));
   fetch('/api/download', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message_ids: msgIds, dialog_name: currentDialogName }),
-  }).then(r => r.json()).then(data => {
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({message_ids: msgIds, dialog_name: currentDialogName}),
+  }).then(r=>r.json()).then(data => {
     if (data.error) { alert(data.error); return; }
     startProgressPolling();
   });
 }
 
 function addDownloadItem(msgId, filename, size) {
-  const container = document.getElementById('tabDownloads');
-  if (container.querySelector('.empty')) container.innerHTML = '';
-  if (document.getElementById('dl-' + msgId)) return;
-  container.insertAdjacentHTML('afterbegin', `
+  const c = document.getElementById('tabDownloads');
+  if (c.querySelector('.empty')) c.innerHTML = '';
+  if (document.getElementById('dl-'+msgId)) return;
+  c.insertAdjacentHTML('afterbegin', `
     <div class="dl-item" id="dl-${msgId}">
-      <div class="dl-name" title="${esc(filename)}">${esc(filename)}</div>
+      <div class="dl-top">
+        <div class="dl-name" title="${esc(filename)}">${esc(filename)}</div>
+        <div class="dl-actions" id="dla-${msgId}">
+          <button class="btn-sm btn-danger" onclick="cancelDownload(${msgId})">取消</button>
+        </div>
+      </div>
       <div class="dl-bar"><div class="dl-bar-fill" style="width:0%"></div></div>
-      <div class="dl-status"><span class="dl-pct">等待中</span><span class="dl-size">${size}</span></div>
+      <div class="dl-status">
+        <span class="dl-pct">等待中</span>
+        <span class="dl-speed"></span>
+        <span class="dl-size">${size}</span>
+      </div>
     </div>
   `);
+}
+
+function cancelDownload(msgId) {
+  fetch('/api/cancel', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({msg_id: msgId}),
+  });
+}
+
+function retryDownload(msgId) {
+  const el = document.getElementById('dl-'+msgId);
+  if (el) {
+    el.classList.remove('dl-error','dl-cancelled');
+    el.querySelector('.dl-bar-fill').style.width = '0%';
+    el.querySelector('.dl-pct').textContent = '等待中';
+    el.querySelector('.dl-speed').textContent = '';
+    el.querySelector('#dla-'+msgId).innerHTML = `<button class="btn-sm btn-danger" onclick="cancelDownload(${msgId})">取消</button>`;
+  }
+  fetch('/api/retry', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({msg_id: msgId, dialog_name: currentDialogName}),
+  }).then(r=>r.json()).then(() => startProgressPolling());
 }
 
 function startProgressPolling() {
@@ -249,40 +532,102 @@ function startProgressPolling() {
   evtSource = new EventSource('/api/progress');
   evtSource.onmessage = function(e) {
     const data = JSON.parse(e.data);
-    for (const [msgId, info] of Object.entries(data)) {
-      if (msgId === '_complete') { evtSource.close(); evtSource = null; loadFiles(); return; }
-      const el = document.getElementById('dl-' + msgId);
+    for (const [mid, info] of Object.entries(data)) {
+      if (mid === '_complete') { evtSource.close(); evtSource = null; loadFiles(); return; }
+      const el = document.getElementById('dl-'+mid);
       if (!el) continue;
-      el.querySelector('.dl-bar-fill').style.width = info.progress + '%';
-      if (info.status === 'done') { el.querySelector('.dl-pct').textContent = '完成'; el.classList.add('dl-done'); }
-      else if (info.status === 'skipped') { el.querySelector('.dl-pct').textContent = '已跳过(文件存在)'; el.classList.add('dl-skipped'); }
-      else if (info.status === 'error') { el.querySelector('.dl-pct').textContent = '错误: ' + info.error; el.classList.add('dl-error'); }
-      else if (info.status === 'downloading') { el.querySelector('.dl-pct').textContent = info.progress + '%'; if (info.downloaded) el.querySelector('.dl-size').textContent = info.downloaded + ' / ' + info.total; }
-      else { el.querySelector('.dl-pct').textContent = '等待中'; }
+      el.querySelector('.dl-bar-fill').style.width = info.progress+'%';
+      const pctEl = el.querySelector('.dl-pct');
+      const spdEl = el.querySelector('.dl-speed');
+      const szEl = el.querySelector('.dl-size');
+      const actEl = el.querySelector('#dla-'+mid);
+
+      if (info.status === 'done') {
+        pctEl.textContent = '完成'; spdEl.textContent = ''; el.classList.add('dl-done');
+        actEl.innerHTML = '';
+      } else if (info.status === 'skipped') {
+        pctEl.textContent = '已跳过'; spdEl.textContent = ''; el.classList.add('dl-skipped');
+        actEl.innerHTML = '';
+      } else if (info.status === 'error') {
+        pctEl.textContent = '错误: '+info.error; spdEl.textContent = ''; el.classList.add('dl-error');
+        actEl.innerHTML = `<button class="btn-sm btn-retry" onclick="retryDownload(${mid})">重试</button>`;
+      } else if (info.status === 'cancelled') {
+        pctEl.textContent = '已取消'; spdEl.textContent = ''; el.classList.add('dl-cancelled');
+        actEl.innerHTML = `<button class="btn-sm btn-retry" onclick="retryDownload(${mid})">重试</button>`;
+      } else if (info.status === 'downloading') {
+        pctEl.textContent = info.progress+'%';
+        if (info.speed) spdEl.textContent = info.speed;
+        if (info.downloaded) szEl.textContent = info.downloaded+' / '+info.total;
+        actEl.innerHTML = `<button class="btn-sm btn-danger" onclick="cancelDownload(${mid})">取消</button>`;
+      } else {
+        pctEl.textContent = '等待中';
+      }
     }
   };
   evtSource.onerror = function() { evtSource.close(); evtSource = null; };
 }
 
+/* Preview */
+function previewByThumb(msgId) {
+  fetch('/api/files').then(r=>r.json()).then(files => {
+    const v = videos.find(x => x.id === msgId);
+    if (!v) return;
+    const f = files.find(x => x.filename === v.filename);
+    if (f) {
+      openPreview('/api/stream/'+encodeURIComponent(f.folder)+'/'+encodeURIComponent(f.filename), v.filename);
+    } else {
+      alert('该视频尚未下载，请先下载后再预览');
+    }
+  });
+}
+
+function previewFile(folder, filename) {
+  openPreview('/api/stream/'+encodeURIComponent(folder)+'/'+encodeURIComponent(filename), filename);
+}
+
+function openPreview(url, title) {
+  const modal = document.getElementById('previewModal');
+  const video = document.getElementById('previewVideo');
+  const titleEl = document.getElementById('previewTitle');
+  video.src = url;
+  titleEl.textContent = title;
+  modal.classList.remove('hidden');
+}
+
+function closePreview(e) {
+  if (e && e.target !== e.currentTarget) return;
+  const modal = document.getElementById('previewModal');
+  const video = document.getElementById('previewVideo');
+  video.pause();
+  video.src = '';
+  modal.classList.add('hidden');
+}
+
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closePreview(); });
+
+/* Tabs */
 function switchTab(tab, el) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   el.classList.add('active');
-  document.getElementById('tabDownloads').style.display = tab === 'downloads' ? '' : 'none';
-  document.getElementById('tabFiles').style.display = tab === 'files' ? '' : 'none';
+  document.getElementById('tabDownloads').style.display = tab==='downloads' ? '' : 'none';
+  document.getElementById('tabFiles').style.display = tab==='files' ? '' : 'none';
   if (tab === 'files') loadFiles();
 }
 
 function loadFiles() {
-  fetch('/api/files').then(r => r.json()).then(data => {
+  fetch('/api/files').then(r=>r.json()).then(data => {
     if (!data.length) { document.getElementById('tabFiles').innerHTML = '<div class="empty">暂无已下载文件</div>'; return; }
     const html = data.map(f => {
-      const dlUrl = '/api/file/' + encodeURIComponent(f.folder) + '/' + encodeURIComponent(f.filename);
+      const dlUrl = '/api/file/'+encodeURIComponent(f.folder)+'/'+encodeURIComponent(f.filename);
       return `<div class="file-item">
         <div class="file-info">
-          <div class="fname" title="${esc(f.folder)}/${esc(f.filename)}"><span class="folder">${esc(f.folder)}/</span> ${esc(f.filename)}</div>
+          <div class="fname" title="${esc(f.folder)}/${esc(f.filename)}" onclick="previewFile('${esc(f.folder)}','${esc(f.filename)}')"><span class="folder">${esc(f.folder)}/</span> ${esc(f.filename)}</div>
           <div class="meta">${f.size} · ${f.modified}</div>
         </div>
-        <a class="btn-dl" href="${dlUrl}" download="${esc(f.filename)}">下载</a>
+        <div class="file-btns">
+          <span class="btn-dl" onclick="previewFile('${esc(f.folder)}','${esc(f.filename)}')" style="cursor:pointer">播放</span>
+          <a class="btn-dl" href="${dlUrl}" download="${esc(f.filename)}">下载</a>
+        </div>
       </div>`;
     }).join('');
     document.getElementById('tabFiles').innerHTML = html;
@@ -290,8 +635,6 @@ function loadFiles() {
 }
 
 function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
-
-loadDialogs();
 </script>
 </body>
 </html>
