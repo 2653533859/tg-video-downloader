@@ -35,12 +35,93 @@ download_cancel = {}
 THUMB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".thumbs")
 os.makedirs(THUMB_DIR, exist_ok=True)
 
+_reconnect_lock = threading.Lock()
+_last_reconnect_attempt = 0.0
 
-def run_async(coro):
-    if not tg_connected:
-        raise Exception("Telegram 未连接，请等待重连...")
-    future = asyncio.run_coroutine_threadsafe(coro, tg_loop)
-    return future.result(timeout=600)
+
+def _format_user_display(me):
+    username = getattr(me, "username", None)
+    if username:
+        return f"{me.first_name} (@{username})"
+    return me.first_name
+
+
+def ensure_tg_connection(allow_reconnect=True):
+    global tg_connected, tg_connect_error, tg_user_info, _last_reconnect_attempt
+
+    if tg_client.is_connected():
+        tg_connected = True
+        if tg_connect_error.startswith("Telegram 已断开"):
+            tg_connect_error = ""
+        return True
+
+    tg_connected = False
+
+    if not tg_loop.is_running():
+        tg_connect_error = "Telegram 客户端尚未启动，请稍后重试..."
+        return False
+
+    if not allow_reconnect:
+        if not tg_connect_error:
+            tg_connect_error = "Telegram 未连接，请等待重连..."
+        return False
+
+    now = time.time()
+    if now - _last_reconnect_attempt < 8:
+        if not tg_connect_error:
+            tg_connect_error = "Telegram 重连中，请稍后重试..."
+        return False
+
+    with _reconnect_lock:
+        now = time.time()
+        if tg_client.is_connected():
+            tg_connected = True
+            tg_connect_error = ""
+            return True
+
+        if now - _last_reconnect_attempt < 8:
+            tg_connect_error = tg_connect_error or "Telegram 重连中，请稍后重试..."
+            return False
+
+        _last_reconnect_attempt = now
+        tg_connect_error = "Telegram 已断开，正在重连..."
+
+        try:
+            async def _reconnect():
+                await tg_client.connect()
+                if not await tg_client.is_user_authorized():
+                    raise Exception("Telegram 未登录，请先运行 downloader.py 登录。")
+                me = await tg_client.get_me()
+                return _format_user_display(me)
+
+            tg_user_info = asyncio.run_coroutine_threadsafe(_reconnect(), tg_loop).result(timeout=45)
+            tg_connected = True
+            tg_connect_error = ""
+            return True
+        except Exception as e:
+            tg_connected = False
+            tg_connect_error = f"Telegram 重连失败: {e}"
+            return False
+
+
+def run_async(coro_factory, timeout=600, allow_reconnect=True):
+    global tg_connected, tg_connect_error
+
+    if not callable(coro_factory):
+        raise TypeError("run_async expects a callable returning coroutine")
+
+    if not ensure_tg_connection(allow_reconnect=allow_reconnect):
+        raise Exception(tg_connect_error or "Telegram 未连接，请等待重连...")
+
+    future = asyncio.run_coroutine_threadsafe(coro_factory(), tg_loop)
+    try:
+        return future.result(timeout=timeout)
+    except Exception as e:
+        msg = str(e).lower()
+        if "disconnected" in msg or "connection reset" in msg or "could not connect to proxy" in msg:
+            tg_connected = False
+            tg_connect_error = f"Telegram 连接中断: {e}"
+        raise
 
 
 def get_video_info(message):
@@ -102,6 +183,7 @@ def index():
 
 @app.route("/api/status")
 def api_status():
+    ensure_tg_connection(allow_reconnect=True)
     return jsonify({
         "connected": tg_connected,
         "error": tg_connect_error,
@@ -112,7 +194,7 @@ def api_status():
 @app.route("/api/dialogs")
 def api_dialogs():
     try:
-        dialogs = run_async(tg_client.get_dialogs())
+        dialogs = run_async(lambda: tg_client.get_dialogs())
         _dialogs_cache.clear()
         _dialogs_cache.extend(dialogs)
         result = []
@@ -143,8 +225,6 @@ def api_dialogs():
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/search")
@@ -153,7 +233,7 @@ def api_search():
     if not query:
         return jsonify({"error": "请输入搜索内容"}), 400
     try:
-        entity = run_async(tg_client.get_entity(query))
+        entity = run_async(lambda: tg_client.get_entity(query))
         name = getattr(entity, "title", None) or getattr(entity, "first_name", query)
         _current_entity_cache["search_entity"] = entity
         _current_entity_cache["search_name"] = name
@@ -176,7 +256,7 @@ def api_videos():
             entity = _current_entity_cache["search_entity"]
             name = _current_entity_cache.get("search_name", "unknown")
         elif source == "search" and entity_id:
-            entity = run_async(tg_client.get_entity(entity_id))
+            entity = run_async(lambda: tg_client.get_entity(entity_id))
             name = getattr(entity, "title", None) or "unknown"
         elif dialog_index is not None and dialog_index < len(_dialogs_cache):
             entity = _dialogs_cache[dialog_index].entity
@@ -211,7 +291,7 @@ def api_videos():
                     posts_with_replies.append({"id": message.id, "count": message.replies.replies})
             return videos, posts_with_replies
 
-        videos, posts_with_replies = run_async(scan())
+        videos, posts_with_replies = run_async(scan)
         _videos_cache[ck] = {"videos": videos, "posts_with_replies": posts_with_replies, "time": time.time()}
         return jsonify({
             "videos": videos, 
@@ -249,7 +329,7 @@ def api_replies():
                 print(f"扫描帖子 {post_id} 评论失败: {e}")
             return rv
 
-        replies_videos = run_async(scan_one_post_replies())
+        replies_videos = run_async(scan_one_post_replies)
         return jsonify({"videos": replies_videos})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -264,7 +344,7 @@ def api_thumb(msg_id):
     if not message:
         return Response(status=404)
     try:
-        data = run_async(tg_client.download_media(message, file=bytes, thumb=-1))
+        data = run_async(lambda: tg_client.download_media(message, file=bytes, thumb=-1), allow_reconnect=False)
         if not data:
             return Response(status=404)
         with open(thumb_path, "wb") as f:
@@ -333,6 +413,11 @@ def api_retry():
     thread = threading.Thread(target=_do_download, args=([msg_id], dialog_name), daemon=True)
     thread.start()
     return jsonify({"ok": True})
+
+
+@app.route("/api/download_status")
+def api_download_status():
+    return jsonify(dict(download_status))
 
 
 @app.route("/api/progress")
@@ -411,10 +496,13 @@ def _do_download(message_ids, dialog_name):
             return cb
 
         try:
-            run_async(tg_client.download_media(
-                message, file=filepath,
-                progress_callback=make_cb(msg_id, info["filename"], info["size"]),
-            ))
+            run_async(
+                lambda: tg_client.download_media(
+                    message, file=filepath,
+                    progress_callback=make_cb(msg_id, info["filename"], info["size"]),
+                ),
+                allow_reconnect=False,
+            )
             download_status[msg_id]["progress"] = 100
             download_status[msg_id]["status"] = "done"
             download_status[msg_id]["speed"] = ""
@@ -529,7 +617,7 @@ def start_tg_client():
                 sys.exit(1)
 
             me = tg_loop.run_until_complete(tg_client.get_me())
-            tg_user_info = f"{me.first_name} (@{me.username})"
+            tg_user_info = _format_user_display(me)
             tg_connected = True
             tg_connect_error = ""
             retry_count = 0

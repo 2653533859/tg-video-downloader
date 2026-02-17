@@ -1,6 +1,10 @@
 venv/
-__pycache__/
-*.session*
+*.session
+*.session-journal
 downloads/
-.env
+__pycache__/
 .thumbs/
+*.bak*
+*.bak_*
+*.pre_fix_*
+.env

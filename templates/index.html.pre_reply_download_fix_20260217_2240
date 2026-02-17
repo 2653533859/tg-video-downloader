@@ -254,7 +254,6 @@ function checkStatus() {
 // 启动时立即检查，之后每5秒检查一次
 checkStatus();
 statusTimer = setInterval(checkStatus, 5000);
-restoreDownloadTasks();
 
 function loadDialogs() {
   document.getElementById('dialogList').innerHTML = '<div class="loading">加载中...</div>';
@@ -385,8 +384,6 @@ async function scanRepliesSequentially(posts, entityId, cacheTag) {
             });
 
             if (newVideosFound) {
-                document.getElementById('filterBar').style.display = 'flex';
-                document.getElementById('videoToolbar').style.display = 'flex';
                 updateVideoTitle(cacheTag);
                 document.getElementById('videoTitle').appendChild(statusToast);
                 applyFilter();
@@ -484,11 +481,10 @@ function downloadSelected() {
   });
 }
 
-function addDownloadItem(msgId, filename, size = '') {
+function addDownloadItem(msgId, filename, size) {
   const c = document.getElementById('tabDownloads');
   if (c.querySelector('.empty')) c.innerHTML = '';
   if (document.getElementById('dl-'+msgId)) return;
-  const safeSize = size || '';
   c.insertAdjacentHTML('afterbegin', `
     <div class="dl-item" id="dl-${msgId}">
       <div class="dl-top">
@@ -501,7 +497,7 @@ function addDownloadItem(msgId, filename, size = '') {
       <div class="dl-status">
         <span class="dl-pct">等待中</span>
         <span class="dl-speed"></span>
-        <span class="dl-size">${safeSize}</span>
+        <span class="dl-size">${size}</span>
       </div>
     </div>
   `);
@@ -531,108 +527,44 @@ function retryDownload(msgId) {
   }).then(r=>r.json()).then(() => startProgressPolling());
 }
 
-function isTerminalStatus(status) {
-  return ['done', 'skipped', 'error', 'cancelled'].includes(status);
-}
-
-function applyDownloadStatus(mid, info) {
-  const msgId = parseInt(mid, 10);
-  if (Number.isNaN(msgId)) return;
-
-  addDownloadItem(msgId, info.filename || 'unknown', info.total || '');
-
-  const el = document.getElementById('dl-'+msgId);
-  if (!el) return;
-
-  el.classList.remove('dl-done', 'dl-skipped', 'dl-error', 'dl-cancelled');
-  el.querySelector('.dl-bar-fill').style.width = (info.progress || 0) + '%';
-
-  const pctEl = el.querySelector('.dl-pct');
-  const spdEl = el.querySelector('.dl-speed');
-  const szEl = el.querySelector('.dl-size');
-  const actEl = el.querySelector('#dla-'+msgId);
-
-  if (!pctEl || !spdEl || !szEl || !actEl) return;
-
-  if (info.status === 'done') {
-    pctEl.textContent = '完成';
-    spdEl.textContent = '';
-    if (info.total) szEl.textContent = info.total;
-    el.classList.add('dl-done');
-    actEl.innerHTML = '';
-  } else if (info.status === 'skipped') {
-    pctEl.textContent = '已跳过';
-    spdEl.textContent = '';
-    if (info.total) szEl.textContent = info.total;
-    el.classList.add('dl-skipped');
-    actEl.innerHTML = '';
-  } else if (info.status === 'error') {
-    pctEl.textContent = '错误: ' + (info.error || '未知错误');
-    spdEl.textContent = '';
-    el.classList.add('dl-error');
-    actEl.innerHTML = `<button class="btn-sm btn-retry" onclick="retryDownload(${msgId})">重试</button>`;
-  } else if (info.status === 'cancelled') {
-    pctEl.textContent = '已取消';
-    spdEl.textContent = '';
-    el.classList.add('dl-cancelled');
-    actEl.innerHTML = `<button class="btn-sm btn-retry" onclick="retryDownload(${msgId})">重试</button>`;
-  } else if (info.status === 'downloading') {
-    pctEl.textContent = (info.progress || 0) + '%';
-    spdEl.textContent = info.speed || '';
-    if (info.downloaded) {
-      szEl.textContent = info.downloaded + (info.total ? ' / ' + info.total : '');
-    } else if (info.total) {
-      szEl.textContent = info.total;
-    }
-    actEl.innerHTML = `<button class="btn-sm btn-danger" onclick="cancelDownload(${msgId})">取消</button>`;
-  } else {
-    pctEl.textContent = '等待中';
-    spdEl.textContent = '';
-    if (info.total) szEl.textContent = info.total;
-    actEl.innerHTML = `<button class="btn-sm btn-danger" onclick="cancelDownload(${msgId})">取消</button>`;
-  }
-}
-
-function restoreDownloadTasks() {
-  fetch('/api/download_status').then(r => r.json()).then(data => {
-    const entries = Object.entries(data || {});
-    if (!entries.length) return;
-
-    entries.sort((a, b) => parseInt(b[0], 10) - parseInt(a[0], 10));
-    entries.forEach(([mid, info]) => applyDownloadStatus(mid, info));
-
-    const hasRunning = entries.some(([, info]) => !isTerminalStatus(info.status));
-    if (hasRunning) startProgressPolling();
-  }).catch(() => {});
-}
-
 function startProgressPolling() {
   if (evtSource) { evtSource.close(); evtSource = null; }
   evtSource = new EventSource('/api/progress');
   evtSource.onmessage = function(e) {
     const data = JSON.parse(e.data);
-    let completed = false;
-
     for (const [mid, info] of Object.entries(data)) {
-      if (mid === '_complete') {
-        completed = true;
-        continue;
-      }
-      applyDownloadStatus(mid, info);
-    }
+      if (mid === '_complete') { evtSource.close(); evtSource = null; loadFiles(); return; }
+      const el = document.getElementById('dl-'+mid);
+      if (!el) continue;
+      el.querySelector('.dl-bar-fill').style.width = info.progress+'%';
+      const pctEl = el.querySelector('.dl-pct');
+      const spdEl = el.querySelector('.dl-speed');
+      const szEl = el.querySelector('.dl-size');
+      const actEl = el.querySelector('#dla-'+mid);
 
-    if (completed) {
-      evtSource.close();
-      evtSource = null;
-      loadFiles();
+      if (info.status === 'done') {
+        pctEl.textContent = '完成'; spdEl.textContent = ''; el.classList.add('dl-done');
+        actEl.innerHTML = '';
+      } else if (info.status === 'skipped') {
+        pctEl.textContent = '已跳过'; spdEl.textContent = ''; el.classList.add('dl-skipped');
+        actEl.innerHTML = '';
+      } else if (info.status === 'error') {
+        pctEl.textContent = '错误: '+info.error; spdEl.textContent = ''; el.classList.add('dl-error');
+        actEl.innerHTML = `<button class="btn-sm btn-retry" onclick="retryDownload(${mid})">重试</button>`;
+      } else if (info.status === 'cancelled') {
+        pctEl.textContent = '已取消'; spdEl.textContent = ''; el.classList.add('dl-cancelled');
+        actEl.innerHTML = `<button class="btn-sm btn-retry" onclick="retryDownload(${mid})">重试</button>`;
+      } else if (info.status === 'downloading') {
+        pctEl.textContent = info.progress+'%';
+        if (info.speed) spdEl.textContent = info.speed;
+        if (info.downloaded) szEl.textContent = info.downloaded+' / '+info.total;
+        actEl.innerHTML = `<button class="btn-sm btn-danger" onclick="cancelDownload(${mid})">取消</button>`;
+      } else {
+        pctEl.textContent = '等待中';
+      }
     }
   };
-  evtSource.onerror = function() {
-    if (evtSource) {
-      evtSource.close();
-      evtSource = null;
-    }
-  };
+  evtSource.onerror = function() { evtSource.close(); evtSource = null; };
 }
 
 /* Preview */
