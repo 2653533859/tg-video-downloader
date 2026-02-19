@@ -38,6 +38,8 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; b
 .panel-dialogs { width: 260px; }
 .panel-videos { flex: 1; min-width: 0; }
 .panel-downloads { width: 320px; border-right: none; }
+.queue-summary { padding: 8px 14px; font-size: 11px; color: var(--dim); border-bottom: 1px solid var(--border); background: #111; }
+.queue-summary strong { color: var(--accent); }
 .panel-header { padding: 10px 14px; background: var(--panel); border-bottom: 1px solid var(--border); font-size: 13px; font-weight: 600; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; }
 
 /* Tabs */
@@ -201,6 +203,10 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; b
       <div class="tab active" onclick="switchTab('downloads',this)">下载任务</div>
       <div class="tab" onclick="switchTab('files',this)">已下载文件</div>
     </div>
+    <div style="display:flex;align-items:center;border-bottom:1px solid var(--border);background:#111;">
+      <div class="queue-summary" id="queueSummary" style="border-bottom:none;flex:1;">并发 0/3 · 排队 0 · 总速率 0B/s</div>
+      <button onclick="clearCompletedTasks()" title="清除已完成/已跳过的任务" style="background:none;border:none;border-left:1px solid #2a2a2a;color:#555;padding:0 10px;cursor:pointer;font-size:11px;height:100%;white-space:nowrap;flex-shrink:0;">清除已完成</button>
+    </div>
     <div id="tabDownloads"><div class="empty">暂无下载任务</div></div>
     <div id="tabFiles" style="display:none"><div class="loading">加载中...</div></div>
   </div>
@@ -225,6 +231,35 @@ let evtSource = null;
 let statusTimer = null;
 let isConnected = false;
 let selectedIds = new Set();
+const TASK_ID_SEP = ':';
+const TASK_ID_DOM_SANITIZER = /[^a-zA-Z0-9:_-]/g;
+const MAX_CONCURRENT_HINT = 3;
+let lastQueueSnapshot = null;
+let reconnectTimer = null;
+let pollGeneration = 0;
+
+function makeTaskId(entityId, msgId) {
+  return `${entityId}${TASK_ID_SEP}${msgId}`;
+}
+
+function domIdForTask(taskId) {
+  return `dl-${String(taskId).replace(TASK_ID_DOM_SANITIZER, '_')}`;
+}
+
+function setTaskMeta(el, taskId, entityId, msgId, dialogName) {
+  if (!el) return;
+  el.dataset.taskId = taskId;
+  if (entityId !== undefined && entityId !== null) el.dataset.entityId = entityId;
+  if (msgId !== undefined && msgId !== null) el.dataset.msgId = msgId;
+  if (dialogName) el.dataset.dialogName = dialogName;
+}
+
+function actionContainerFor(el) {
+  if (!el) return null;
+  const actionId = el.dataset.actionsId;
+  if (actionId) return document.getElementById(actionId);
+  return el.querySelector('.dl-actions');
+}
 
 // 连接状态检查
 function checkStatus() {
@@ -280,7 +315,7 @@ function renderDialogs(data) {
   const html = data.map(d => {
     const bc = d.type==='频道'?'badge-channel':d.type==='群组'?'badge-group':'badge-private';
     const active = currentEntity && currentEntity.dialog_index === d.index ? 'active' : '';
-    return `<div class="dialog-item ${active}" onclick="selectDialog(${d.index},'${esc(d.name)}',${d.id}, this)">
+    return `<div class="dialog-item ${active}" onclick="selectDialog(${d.index},${JSON.stringify(d.name)},${d.id}, this)">
       <div class="dialog-name">${esc(d.name)}</div>
       <div class="dialog-type"><span class="badge ${bc}">${d.type}</span></div>
     </div>`;
@@ -418,9 +453,10 @@ function applyFilter() {
 }
 
 function renderVideoList() {
+  const entityParam = currentEntity && currentEntity.entity_id != null ? `?entity=${encodeURIComponent(currentEntity.entity_id)}` : '';
   const html = filteredVideos.map((v, i) => {
     const thumb = v.has_thumb
-      ? `<img class="video-thumb" src="/api/thumb/${v.id}" loading="lazy" onclick="previewByThumb(${v.id})" onerror="this.outerHTML='<div class=\'video-thumb-placeholder\'>&#9654;</div>'">`
+      ? `<img class="video-thumb" src="/api/thumb/${v.id}${entityParam}" loading="lazy" onclick="previewByThumb(${v.id})" onerror="this.outerHTML='<div class=\'video-thumb-placeholder\'>&#9654;</div>'">`
       : '<div class="video-thumb-placeholder">&#9654;</div>';
     const rb = v.source && v.source !== '主消息' ? '<span class="badge badge-reply">'+esc(v.source)+'</span>' : '';
     const isChecked = selectedIds.has(v.id) ? 'checked' : '';
@@ -464,142 +500,239 @@ function updateSelectedCount() {
 }
 
 function fmtSize(b) {
+  if (typeof b !== 'number') b = Number(b) || 0;
+  if (!Number.isFinite(b) || b < 0) return '0B';
   for (const u of ['B','KB','MB','GB']) { if (b < 1024) return b.toFixed(1)+u; b /= 1024; }
   return b.toFixed(1)+'TB';
 }
 
+function formatEta(seconds) {
+  if (!Number.isFinite(seconds) || seconds <= 0) return '';
+  const total = Math.round(seconds);
+  const mins = Math.floor(total / 60);
+  const secs = total % 60;
+  if (mins >= 60) {
+    const hours = Math.floor(mins / 60);
+    const remMins = mins % 60;
+    return `${hours}h ${remMins}m`;
+  }
+  if (mins > 0) {
+    return `${mins}m ${secs.toString().padStart(2, '0')}s`;
+  }
+  return `${secs}s`;
+}
+
+function updateQueueSummary(queueData = null, tasks = null) {
+  const el = document.getElementById('queueSummary');
+  if (!el) return;
+  if (!queueData) {
+    queueData = lastQueueSnapshot || { active: 0, queued: 0, max: MAX_CONCURRENT_HINT };
+  } else {
+    lastQueueSnapshot = queueData;
+  }
+  const totalSpeed = tasks ? Object.values(tasks).reduce((sum, info) => sum + (info.speed_bps || 0), 0) : 0;
+  const speedText = totalSpeed ? fmtSize(totalSpeed) + '/s' : '0B/s';
+  const active = queueData.active ?? 0;
+  const queued = queueData.queued ?? 0;
+  const max = queueData.max ?? MAX_CONCURRENT_HINT;
+  el.innerHTML = `并发 <strong>${active}</strong>/${max} · 排队 <strong>${queued}</strong> · 总速率 <strong>${speedText}</strong>`;
+}
+
 function downloadSelected() {
   if (!selectedIds.size) { alert('请先选择视频'); return; }
+  if (!currentEntity || currentEntity.entity_id == null) { alert('缺少对话 ID，请重新选择对话'); return; }
+  const entityId = currentEntity.entity_id;
   const msgIds = [...selectedIds];
   const selected = videos.filter(v => selectedIds.has(v.id));
-  selected.forEach(v => addDownloadItem(v.id, v.filename, v.size_fmt));
+  selected.forEach(v => {
+    const taskId = makeTaskId(entityId, v.id);
+    addDownloadItem(taskId, v.filename, v.size_fmt, entityId, v.id, currentDialogName);
+  });
   switchTab('downloads', document.querySelector('.tab'));
   fetch('/api/download', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({message_ids: msgIds, dialog_name: currentDialogName}),
+    body: JSON.stringify({message_ids: msgIds, dialog_name: currentDialogName, entity_id: entityId}),
   }).then(r=>r.json()).then(data => {
     if (data.error) { alert(data.error); return; }
     startProgressPolling();
   });
 }
 
-function addDownloadItem(msgId, filename, size = '') {
-  const c = document.getElementById('tabDownloads');
-  if (c.querySelector('.empty')) c.innerHTML = '';
-  if (document.getElementById('dl-'+msgId)) return;
+function addDownloadItem(taskId, filename, size = '', entityId = '', msgId = '', dialogName = '') {
+  const container = document.getElementById('tabDownloads');
+  if (container.querySelector('.empty')) container.innerHTML = '';
+  const domId = domIdForTask(taskId);
+  const actionDomId = `dla-${domId}`;
   const safeSize = size || '';
-  c.insertAdjacentHTML('afterbegin', `
-    <div class="dl-item" id="dl-${msgId}">
-      <div class="dl-top">
-        <div class="dl-name" title="${esc(filename)}">${esc(filename)}</div>
-        <div class="dl-actions" id="dla-${msgId}">
-          <button class="btn-sm btn-danger" onclick="cancelDownload(${msgId})">取消</button>
+  let el = document.getElementById(domId);
+  if (!el) {
+    container.insertAdjacentHTML('afterbegin', `
+      <div class="dl-item" id="${domId}">
+        <div class="dl-top">
+          <div class="dl-name" title="${esc(filename)}">${esc(filename)}</div>
+          <div class="dl-actions" id="${actionDomId}">
+            <button class="btn-sm btn-danger" onclick="cancelDownload('${taskId}')">取消</button>
+          </div>
+        </div>
+        <div class="dl-bar"><div class="dl-bar-fill" style="width:0%"></div></div>
+        <div class="dl-status">
+          <span class="dl-pct">等待中</span>
+          <span class="dl-speed"></span>
+          <span class="dl-size">${safeSize}</span>
         </div>
       </div>
-      <div class="dl-bar"><div class="dl-bar-fill" style="width:0%"></div></div>
-      <div class="dl-status">
-        <span class="dl-pct">等待中</span>
-        <span class="dl-speed"></span>
-        <span class="dl-size">${safeSize}</span>
-      </div>
-    </div>
-  `);
+    `);
+    el = document.getElementById(domId);
+  }
+  if (el) {
+    const actionEl = el.querySelector('.dl-actions');
+    if (actionEl) actionEl.id = actionDomId;
+    el.dataset.actionsId = actionDomId;
+  }
+  setTaskMeta(el, taskId, entityId, msgId, dialogName);
 }
 
-function cancelDownload(msgId) {
+function cancelDownload(taskId) {
   fetch('/api/cancel', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({msg_id: msgId}),
+    body: JSON.stringify({task_id: taskId}),
   });
 }
 
-function retryDownload(msgId) {
-  const el = document.getElementById('dl-'+msgId);
+function retryDownload(taskId) {
+  const domId = domIdForTask(taskId);
+  const el = document.getElementById(domId);
   if (el) {
     el.classList.remove('dl-error','dl-cancelled');
     el.querySelector('.dl-bar-fill').style.width = '0%';
     el.querySelector('.dl-pct').textContent = '等待中';
     el.querySelector('.dl-speed').textContent = '';
-    el.querySelector('#dla-'+msgId).innerHTML = `<button class="btn-sm btn-danger" onclick="cancelDownload(${msgId})">取消</button>`;
+    const actionEl = actionContainerFor(el);
+    if (actionEl) {
+      actionEl.innerHTML = `<button class="btn-sm btn-danger" onclick="cancelDownload('${taskId}')">取消</button>`;
+    }
   }
+  const dialogName = el?.dataset.dialogName || currentDialogName;
+  const entityId = el?.dataset.entityId || currentEntity?.entity_id || null;
   fetch('/api/retry', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({msg_id: msgId, dialog_name: currentDialogName}),
+    body: JSON.stringify({task_id: taskId, dialog_name: dialogName, entity_id: entityId}),
   }).then(r=>r.json()).then(() => startProgressPolling());
+}
+
+function clearCompletedTasks() {
+  const doneEls = [...document.querySelectorAll('#tabDownloads .dl-item.dl-done, #tabDownloads .dl-item.dl-skipped')];
+  const taskIds = doneEls.map(el => el.dataset.taskId).filter(Boolean);
+  fetch('/api/clear_tasks', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({task_ids: taskIds})}).catch(() => {});
+  doneEls.forEach(el => el.remove());
+  const container = document.getElementById('tabDownloads');
+  if (container && !container.querySelector('.dl-item')) container.innerHTML = '<div class="empty">暂无下载任务</div>';
 }
 
 function isTerminalStatus(status) {
   return ['done', 'skipped', 'error', 'cancelled'].includes(status);
 }
 
-function applyDownloadStatus(mid, info) {
-  const msgId = parseInt(mid, 10);
-  if (Number.isNaN(msgId)) return;
+function applyDownloadStatus(taskId, info) {
+  if (!taskId) return;
 
-  addDownloadItem(msgId, info.filename || 'unknown', info.total || '');
+  addDownloadItem(taskId, info.filename || 'unknown', info.total || '', info.entity_id, info.msg_id, info.dialog_name);
 
-  const el = document.getElementById('dl-'+msgId);
+  const domId = domIdForTask(taskId);
+  const el = document.getElementById(domId);
   if (!el) return;
+  setTaskMeta(el, taskId, info.entity_id, info.msg_id, info.dialog_name || el.dataset.dialogName);
 
-  el.classList.remove('dl-done', 'dl-skipped', 'dl-error', 'dl-cancelled');
-  el.querySelector('.dl-bar-fill').style.width = (info.progress || 0) + '%';
-
+  const barEl = el.querySelector('.dl-bar-fill');
+  if (barEl) barEl.style.width = (info.progress || 0) + '%';
   const pctEl = el.querySelector('.dl-pct');
   const spdEl = el.querySelector('.dl-speed');
   const szEl = el.querySelector('.dl-size');
-  const actEl = el.querySelector('#dla-'+msgId);
+  const actEl = actionContainerFor(el);
+  if (!pctEl || !spdEl || !szEl) return;
 
-  if (!pctEl || !spdEl || !szEl || !actEl) return;
+  const downloadedLabel = info.downloaded || (info.downloaded_bytes != null ? fmtSize(info.downloaded_bytes) : '');
+  const totalLabel = info.total || (info.total_bytes ? fmtSize(info.total_bytes) : '');
+  const etaSeconds = info.speed_bps && info.total_bytes ? Math.max(0, (info.total_bytes - (info.downloaded_bytes || 0)) / (info.speed_bps || 1)) : 0;
+  const speedParts = [];
+  if (info.speed) speedParts.push(info.speed);
+  const etaText = formatEta(etaSeconds);
+  if (etaText) speedParts.push('ETA ' + etaText);
+  spdEl.textContent = speedParts.join(' · ');
+
+  const sizeDisplay = downloadedLabel ? `${downloadedLabel}${totalLabel ? ' / ' + totalLabel : ''}` : totalLabel;
+  if (sizeDisplay) szEl.textContent = sizeDisplay;
+
+  el.classList.remove('dl-done', 'dl-skipped', 'dl-error', 'dl-cancelled');
 
   if (info.status === 'done') {
     pctEl.textContent = '完成';
     spdEl.textContent = '';
-    if (info.total) szEl.textContent = info.total;
+    if (totalLabel) szEl.textContent = totalLabel;
     el.classList.add('dl-done');
-    actEl.innerHTML = '';
+    if (actEl) actEl.innerHTML = '';
+    setTimeout(() => {
+      const item = document.getElementById(domId);
+      if (item && item.classList.contains('dl-done')) {
+        item.remove();
+        const ct = document.getElementById('tabDownloads');
+        if (ct && !ct.querySelector('.dl-item')) ct.innerHTML = '<div class="empty">暂无下载任务</div>';
+      }
+    }, 8000);
   } else if (info.status === 'skipped') {
     pctEl.textContent = '已跳过';
     spdEl.textContent = '';
-    if (info.total) szEl.textContent = info.total;
+    if (totalLabel) szEl.textContent = totalLabel;
     el.classList.add('dl-skipped');
-    actEl.innerHTML = '';
+    if (actEl) actEl.innerHTML = '';
+    setTimeout(() => {
+      const item = document.getElementById(domId);
+      if (item && item.classList.contains('dl-skipped')) {
+        item.remove();
+        const ct = document.getElementById('tabDownloads');
+        if (ct && !ct.querySelector('.dl-item')) ct.innerHTML = '<div class="empty">暂无下载任务</div>';
+      }
+    }, 8000);
   } else if (info.status === 'error') {
     pctEl.textContent = '错误: ' + (info.error || '未知错误');
     spdEl.textContent = '';
     el.classList.add('dl-error');
-    actEl.innerHTML = `<button class="btn-sm btn-retry" onclick="retryDownload(${msgId})">重试</button>`;
+    if (actEl) actEl.innerHTML = `<button class=\"btn-sm btn-retry\" onclick=\"retryDownload('${taskId}')\">重试</button>`;
   } else if (info.status === 'cancelled') {
     pctEl.textContent = '已取消';
     spdEl.textContent = '';
     el.classList.add('dl-cancelled');
-    actEl.innerHTML = `<button class="btn-sm btn-retry" onclick="retryDownload(${msgId})">重试</button>`;
+    if (actEl) actEl.innerHTML = `<button class=\"btn-sm btn-retry\" onclick=\"retryDownload('${taskId}')\">重试</button>`;
+  } else if (info.status === 'queued') {
+    const pos = info.queue_position ? ` (#${info.queue_position})` : '';
+    pctEl.textContent = '排队中' + pos;
+    if (actEl) actEl.innerHTML = `<button class=\"btn-sm btn-danger\" onclick=\"cancelDownload('${taskId}')\">取消</button>`;
   } else if (info.status === 'downloading') {
     pctEl.textContent = (info.progress || 0) + '%';
-    spdEl.textContent = info.speed || '';
-    if (info.downloaded) {
-      szEl.textContent = info.downloaded + (info.total ? ' / ' + info.total : '');
-    } else if (info.total) {
-      szEl.textContent = info.total;
-    }
-    actEl.innerHTML = `<button class="btn-sm btn-danger" onclick="cancelDownload(${msgId})">取消</button>`;
+    if (actEl) actEl.innerHTML = `<button class=\"btn-sm btn-danger\" onclick=\"cancelDownload('${taskId}')\">取消</button>`;
   } else {
     pctEl.textContent = '等待中';
-    spdEl.textContent = '';
-    if (info.total) szEl.textContent = info.total;
-    actEl.innerHTML = `<button class="btn-sm btn-danger" onclick="cancelDownload(${msgId})">取消</button>`;
+    if (actEl) actEl.innerHTML = `<button class=\"btn-sm btn-danger\" onclick=\"cancelDownload('${taskId}')\">取消</button>`;
   }
 }
 
+
 function restoreDownloadTasks() {
-  fetch('/api/download_status').then(r => r.json()).then(data => {
-    const entries = Object.entries(data || {});
+  fetch('/api/download_status').then(r => r.json()).then(payload => {
+    const tasks = payload.tasks || {};
+    updateQueueSummary(payload.queue || null, tasks);
+    const entries = Object.entries(tasks);
     if (!entries.length) return;
 
-    entries.sort((a, b) => parseInt(b[0], 10) - parseInt(a[0], 10));
-    entries.forEach(([mid, info]) => applyDownloadStatus(mid, info));
+    entries.sort((a, b) => {
+      const mb = parseInt((b[1] && b[1].msg_id) || 0, 10);
+      const ma = parseInt((a[1] && a[1].msg_id) || 0, 10);
+      return mb - ma;
+    });
+    entries.forEach(([taskId, info]) => applyDownloadStatus(taskId, info));
 
     const hasRunning = entries.some(([, info]) => !isTerminalStatus(info.status));
     if (hasRunning) startProgressPolling();
@@ -607,32 +740,31 @@ function restoreDownloadTasks() {
 }
 
 function startProgressPolling() {
+  // 关闭旧 SSE（若有）
   if (evtSource) { evtSource.close(); evtSource = null; }
-  evtSource = new EventSource('/api/progress');
-  evtSource.onmessage = function(e) {
-    const data = JSON.parse(e.data);
-    let completed = false;
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
 
-    for (const [mid, info] of Object.entries(data)) {
-      if (mid === '_complete') {
-        completed = true;
-        continue;
-      }
-      applyDownloadStatus(mid, info);
-    }
-
-    if (completed) {
-      evtSource.close();
-      evtSource = null;
-      loadFiles();
-    }
-  };
-  evtSource.onerror = function() {
-    if (evtSource) {
-      evtSource.close();
-      evtSource = null;
-    }
-  };
+  // 用轮询代替 SSE；pollGeneration 防止多个轮询周期并发
+  const gen = ++pollGeneration;
+  function doPoll() {
+    if (gen !== pollGeneration) return;
+    fetch('/api/download_status')
+      .then(r => r.json())
+      .then(payload => {
+        if (gen !== pollGeneration) return;
+        const tasks = payload.tasks || {};
+        Object.entries(tasks).forEach(([tid, info]) => applyDownloadStatus(tid, info));
+        updateQueueSummary(payload.queue || null, tasks);
+        const hasActive = Object.values(tasks).some(t => !isTerminalStatus(t.status));
+        if (hasActive) {
+          reconnectTimer = setTimeout(doPoll, 1000);
+        } else if (Object.keys(tasks).length > 0) {
+          loadFiles();
+        }
+      })
+      .catch(() => { if (gen === pollGeneration) reconnectTimer = setTimeout(doPoll, 2000); });
+  }
+  doPoll();
 }
 
 /* Preview */
@@ -689,11 +821,11 @@ function loadFiles() {
       const dlUrl = '/api/file/'+encodeURIComponent(f.folder)+'/'+encodeURIComponent(f.filename);
       return `<div class="file-item">
         <div class="file-info">
-          <div class="fname" title="${esc(f.folder)}/${esc(f.filename)}" onclick="previewFile('${esc(f.folder)}','${esc(f.filename)}')"><span class="folder">${esc(f.folder)}/</span> ${esc(f.filename)}</div>
+          <div class="fname" title="${esc(f.folder)}/${esc(f.filename)}" onclick="previewFile(${JSON.stringify(f.folder)},${JSON.stringify(f.filename)})"><span class="folder">${esc(f.folder)}/</span> ${esc(f.filename)}</div>
           <div class="meta">${f.size} · ${f.modified}</div>
         </div>
         <div class="file-btns">
-          <span class="btn-dl" onclick="previewFile('${esc(f.folder)}','${esc(f.filename)}')" style="cursor:pointer">播放</span>
+          <span class="btn-dl" onclick="previewFile(${JSON.stringify(f.folder)},${JSON.stringify(f.filename)})" style="cursor:pointer">播放</span>
           <a class="btn-dl" href="${dlUrl}" download="${esc(f.filename)}">下载</a>
         </div>
       </div>`;
