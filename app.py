@@ -686,6 +686,13 @@ def api_retry():
 
 @app.route("/api/download_status")
 def api_download_status():
+    # Auto-cleanup: remove terminal tasks older than 30 seconds
+    now = time.time()
+    stale = [k for k, v in list(download_status.items())
+             if v.get("status") in TERMINAL_STATES
+             and v.get("finish_time") and now - v["finish_time"] > 30]
+    for k in stale:
+        download_status.pop(k, None)
     tasks = {k: dict(v) for k, v in list(download_status.items())}
     return jsonify({"tasks": tasks, "queue": get_queue_status()})
 
@@ -807,11 +814,13 @@ def _do_download(task_items, dialog_name):
         filepath = os.path.join(save_dir, info["filename"])
 
         if os.path.exists(filepath) and os.path.getsize(filepath) == info["size"]:
+            log_info(f"跳过(已存在) [{task_id}] {info['filename']}")
             final_size = info.get("size") or os.path.getsize(filepath)
             download_status[task_id] = {
                 "filename": info["filename"],
                 "progress": 100,
                 "status": "skipped",
+                "finish_time": time.time(),
                 "downloaded": format_size(final_size),
                 "total": format_size(final_size),
                 "error": "",
@@ -911,6 +920,8 @@ def _do_download(task_items, dialog_name):
             final_size = info.get("size") or os.path.getsize(filepath)
             download_status[task_id]["progress"] = 100
             download_status[task_id]["status"] = "done"
+            download_status[task_id]["finish_time"] = time.time()
+            log_info(f"下载完成 [{task_id}] {info['filename']} ({format_size(final_size)})")
             download_status[task_id]["downloaded"] = format_size(final_size)
             download_status[task_id]["total"] = format_size(final_size)
             download_status[task_id]["speed"] = ""
@@ -921,9 +932,11 @@ def _do_download(task_items, dialog_name):
             download_status[task_id]["queue_size"] = 0
         except Exception as e:
             err = str(e)
+            log_error(f"下载失败 [{task_id}] {info.get('filename','?')}: {err}")
             if download_cancel.get(task_id) or "取消" in err:
                 download_status[task_id]["status"] = "cancelled"
                 download_status[task_id]["error"] = "已取消"
+                download_status[task_id]["finish_time"] = time.time()
                 if os.path.exists(filepath):
                     try:
                         os.remove(filepath)
@@ -932,6 +945,7 @@ def _do_download(task_items, dialog_name):
             else:
                 download_status[task_id]["status"] = "error"
                 download_status[task_id]["error"] = err
+                download_status[task_id]["finish_time"] = time.time()
             download_status[task_id]["speed"] = ""
             download_status[task_id]["speed_bps"] = 0.0
             download_status[task_id]["queue_position"] = None

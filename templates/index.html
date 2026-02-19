@@ -237,6 +237,7 @@ const MAX_CONCURRENT_HINT = 3;
 let lastQueueSnapshot = null;
 let reconnectTimer = null;
 let pollGeneration = 0;
+let dismissedTaskIds = new Set();
 
 function makeTaskId(entityId, msgId) {
   return `${entityId}${TASK_ID_SEP}${msgId}`;
@@ -315,18 +316,20 @@ function renderDialogs(data) {
   const html = data.map(d => {
     const bc = d.type==='频道'?'badge-channel':d.type==='群组'?'badge-group':'badge-private';
     const active = currentEntity && currentEntity.dialog_index === d.index ? 'active' : '';
-    return `<div class="dialog-item ${active}" onclick="selectDialog(${d.index},${JSON.stringify(d.name)},${d.id}, this)">
+    return `<div class="dialog-item ${active}" onclick="selectDialog(${d.index}, this)">
       <div class="dialog-name">${esc(d.name)}</div>
       <div class="dialog-type"><span class="badge ${bc}">${d.type}</span></div>
     </div>`;
   }).join('');
   document.getElementById('dialogList').innerHTML = html || '<div class="empty">未找到对话</div>';
 }
-function selectDialog(index, name, id, el) {
+function selectDialog(index, el) {
+  const d = allDialogs.find(x => x.index === index);
+  if (!d) return;
   document.querySelectorAll('.dialog-item').forEach(item => item.classList.remove('active'));
   if (el) el.classList.add('active');
-  currentEntity = { dialog_index: index, entity_id: id, source: 'dialog' };
-  currentDialogName = name;
+  currentEntity = { dialog_index: index, entity_id: d.id, source: 'dialog' };
+  currentDialogName = d.name;
   scanVideos(false);
 }
 
@@ -546,6 +549,7 @@ function downloadSelected() {
   const selected = videos.filter(v => selectedIds.has(v.id));
   selected.forEach(v => {
     const taskId = makeTaskId(entityId, v.id);
+    dismissedTaskIds.delete(taskId);
     addDownloadItem(taskId, v.filename, v.size_fmt, entityId, v.id, currentDialogName);
   });
   switchTab('downloads', document.querySelector('.tab'));
@@ -602,6 +606,7 @@ function cancelDownload(taskId) {
 }
 
 function retryDownload(taskId) {
+  dismissedTaskIds.delete(taskId);
   const domId = domIdForTask(taskId);
   const el = document.getElementById(domId);
   if (el) {
@@ -626,6 +631,7 @@ function retryDownload(taskId) {
 function clearCompletedTasks() {
   const doneEls = [...document.querySelectorAll('#tabDownloads .dl-item.dl-done, #tabDownloads .dl-item.dl-skipped')];
   const taskIds = doneEls.map(el => el.dataset.taskId).filter(Boolean);
+  taskIds.forEach(id => dismissedTaskIds.add(id));
   fetch('/api/clear_tasks', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({task_ids: taskIds})}).catch(() => {});
   doneEls.forEach(el => el.remove());
   const container = document.getElementById('tabDownloads');
@@ -638,6 +644,7 @@ function isTerminalStatus(status) {
 
 function applyDownloadStatus(taskId, info) {
   if (!taskId) return;
+  if (dismissedTaskIds.has(taskId)) return;
 
   addDownloadItem(taskId, info.filename || 'unknown', info.total || '', info.entity_id, info.msg_id, info.dialog_name);
 
@@ -675,6 +682,7 @@ function applyDownloadStatus(taskId, info) {
     el.classList.add('dl-done');
     if (actEl) actEl.innerHTML = '';
     setTimeout(() => {
+      dismissedTaskIds.add(taskId);
       const item = document.getElementById(domId);
       if (item && item.classList.contains('dl-done')) {
         item.remove();
@@ -689,6 +697,7 @@ function applyDownloadStatus(taskId, info) {
     el.classList.add('dl-skipped');
     if (actEl) actEl.innerHTML = '';
     setTimeout(() => {
+      dismissedTaskIds.add(taskId);
       const item = document.getElementById(domId);
       if (item && item.classList.contains('dl-skipped')) {
         item.remove();
