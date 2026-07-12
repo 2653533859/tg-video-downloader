@@ -19,11 +19,11 @@ python3 app.py        # 生产入口（Dockerfile CMD）
 python3 app_new.py    # 等价入口
 ```
 
-两者**最终 serve 的都是 `app_new.app`（Blueprint 装配版）**：`app.py` 的 `__main__`（app.py:2646）会 `import app_new` 并调用 `app_new.app.run()`。
+两者**最终 serve 的都是 `app_new.app`（Blueprint 装配版）**：`app.py` 的 `__main__`（app.py:1932）会 `import app_new` 并调用 `app_new.app.run()`。
 
-- `app.py`（约 2650 行）：**运行时模块**——持有全局状态、Telegram 客户端、下载调度等，大量委托 `src/` 模块。
+- `app.py`（约 1940 行）：**运行时模块**——持有全局状态、Telegram 客户端、下载调度等，大量委托 `src/` 模块。**不含任何路由定义**（P1-5b 已摘除历史死路由），全部路由在 `src/routes/` 的 Blueprint 中。
 - `app_new.py`：Blueprint 装配层——把 `src/routes/` 的 6 个 Blueprint 用 `app.py` 的运行时函数注入初始化。
-- ⚠️ `app.py` 内部自己的 Flask 实例（app.py:125）及挂在其上的 33 个 `@app.route` **从未被 serve，是待清理死代码**（P1-5b）。**新增/修改路由一律在 `src/routes/` 中进行**，不要动 app.py 里的路由定义。
+- **新增/修改路由一律在 `src/routes/` 中进行**，并在 `app_new.py` 的对应 `init_blueprint` 中注入依赖。
 
 ## src/ 模块地图
 
@@ -45,15 +45,15 @@ src/
 ## 并发模型
 
 - Flask `threaded=True` + 两个独立 asyncio 事件循环线程：主 Telegram 客户端（tg_loop）与 relay 客户端（relay_loop，StringSession 避免 session 文件锁冲突）
-- **禁止**在 Flask 请求处理器中 `loop.run_until_complete()`；必须用 `run_async()` / `relay_run_async()`（app.py:887/894，底层是 `TelegramRuntime.run_async`，asyncio.run_coroutine_threadsafe + 超时）
-- 下载并发：`MAX_CONCURRENT_DOWNLOADS = 1`（app.py:488，受 tdl 单实例 Bolt DB 约束）；relay 并发：`MAX_CONCURRENT_RELAYS = 2`
-- 后台线程（全部 daemon，暂无优雅退出——见 Task.md P1-6）：队列 worker、DownloadWatchdog、TelegramHealthChecker（app.py:230 在主客户端连接后初始化）、缩略图清理、任务库备份
+- **禁止**在 Flask 请求处理器中 `loop.run_until_complete()`；必须用 `run_async()` / `relay_run_async()`（app.py:872/879，底层是 `TelegramRuntime.run_async`，asyncio.run_coroutine_threadsafe + 超时）
+- 下载并发：`MAX_CONCURRENT_DOWNLOADS = 1`（app.py:473，受 tdl 单实例 Bolt DB 约束）；relay 并发：`MAX_CONCURRENT_RELAYS = 2`
+- 后台线程（全部 daemon，暂无优雅退出——见 Task.md P1-6）：队列 worker、DownloadWatchdog、TelegramHealthChecker（app.py:213 在主客户端连接后初始化）、缩略图清理、任务库备份
 
 ## 任务状态机
 
 - 过渡态：`submitting` → `queued` → `downloading`（可 `paused`）
-- 终态：`TERMINAL_STATES = {"done", "skipped", "error", "cancelled"}`（app.py:161）
-- 写入经 `set_task_state` / `update_task_state`（app.py:369/429）
+- 终态：`TERMINAL_STATES = {"done", "skipped", "error", "cancelled"}`（app.py:147）
+- 写入经 `set_task_state` / `update_task_state`（app.py:354/414）
 
 ## 持久化
 

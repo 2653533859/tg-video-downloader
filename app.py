@@ -12,8 +12,7 @@ import queue
 import shutil
 from datetime import datetime
 from urllib.parse import quote
-from flask import Flask, render_template, jsonify, request, Response, send_from_directory, send_file
-from werkzeug.routing import BaseConverter
+from flask import jsonify, request
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 from telethon.tl.types import (
@@ -122,20 +121,6 @@ from src.telegram import (
 )
 from src.telegram.runtime import TelegramRuntime
 
-app = Flask(__name__)
-
-
-class SignedIntConverter(BaseConverter):
-    regex = r"-?\d+"
-
-    def to_python(self, value):
-        return int(value)
-
-    def to_url(self, value):
-        return str(int(value))
-
-
-app.url_map.converters["signed_int"] = SignedIntConverter
 
 from telethon.sessions import StringSession
 
@@ -174,7 +159,6 @@ tdl_runtime = TdlRuntime(
     has_fallback_channel=lambda entity_id: _has_tdl_fallback_channel(entity_id),
     chat_id_overrides=TDL_CHAT_ID_OVERRIDES,
 )
-
 
 
 def _watchdog_tasks_snapshot():
@@ -217,7 +201,6 @@ download_watchdog = DownloadWatchdog(
 )
 
 
-
 # 全局健康检查实例（需要在 tg_client 初始化后创建）
 tg_health_checker = None
 
@@ -246,7 +229,6 @@ def init_tg_health_checker():
 
 TDL_MAX_RETRY_ATTEMPTS = 5
 TDL_MAX_STALLED_EOF_RETRIES = 2
-
 
 
 def _is_local_bind_only():
@@ -1460,74 +1442,6 @@ def _get_cached_message(msg_id, entity_id=None):
     return get_cached_message(msg_id, entity_id)
 
 
-@app.before_request
-def enforce_access_control():
-    if request.path.startswith("/relay/"):
-        return None
-    auth_error = _require_web_auth()
-    if auth_error is not None:
-        return auth_error
-
-
-@app.route("/")
-def index():
-    return render_template("index.html")
-
-@app.route("/api/open-folder", methods=["POST"])
-def api_open_folder():
-    folder = (request.json or {}).get("folder", "")
-    if not folder:
-        return jsonify({"error": "Missing folder"}), 400
-    try:
-        payload, status_code = prepare_open_folder(
-            _resolve_download_path,
-            folder,
-            OPEN_FOLDER_ENABLED,
-            _request_ip_is_local(),
-        )
-        return jsonify(payload), status_code
-    except FileNotFoundError:
-        return jsonify({"error": "Folder not found"}), 404
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route("/api/rename-file", methods=["POST"])
-def api_rename_file():
-    data = request.json or {}
-    folder, old_name, new_name = data.get("folder"), data.get("old_name"), data.get("new_name")
-    if not all([folder, old_name, new_name]):
-        return jsonify({"error": "Missing parameters"}), 400
-    try:
-        rename_download_file(_resolve_download_path, folder, old_name, new_name)
-        return jsonify({"ok": True})
-    except FileNotFoundError:
-        return jsonify({"error": "File not found"}), 404
-    except FileExistsError as e:
-        return jsonify({"error": str(e)}), 400
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route("/api/delete-file", methods=["POST"])
-def api_delete_file():
-    data = request.json or {}
-    folder, filename = data.get("folder"), data.get("filename")
-    if not all([folder, filename]):
-        return jsonify({"error": "Missing parameters"}), 400
-    try:
-        delete_download_file(_resolve_download_path, folder, filename)
-        return jsonify({"ok": True})
-    except FileNotFoundError:
-        return jsonify({"error": "File not found"}), 404
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
 system_status_service = None
 proxy_switch_lock = threading.RLock()
 
@@ -1722,12 +1636,10 @@ def _apply_proxy_type(proxy_type):
         return {"reconnected": True}
 
 
-@app.route("/api/settings/proxy", methods=["GET"])
 def api_get_proxy_settings():
     return jsonify(_proxy_settings_payload())
 
 
-@app.route("/api/settings/proxy", methods=["POST"])
 def api_set_proxy_settings():
     data = request.json or {}
     try:
@@ -1787,11 +1699,6 @@ def get_system_status_service():
     return system_status_service
 
 
-@app.route("/api/status")
-def api_status():
-    return jsonify(get_system_status_service().status_payload())
-
-
 def _proxy_status():
     return get_system_status_service().proxy_status()
 
@@ -1800,452 +1707,7 @@ def _tdl_version_summary():
     return get_system_status_service().tdl_version_summary()
 
 
-@app.route("/api/health")
-def api_health():
-    return jsonify(get_system_status_service().health_payload())
-
-
-@app.route("/api/dialogs")
-def api_dialogs():
-    force_refresh = request.args.get("refresh", "false") == "true"
-    started_refresh = _kickoff_dialogs_refresh(force=force_refresh)
-    snapshot = _dialogs_cache_snapshot()
-
-    if snapshot["dialogs"]:
-        return jsonify({
-            "dialogs": snapshot["dialogs"],
-            "cached": True,
-            "loading": snapshot["loading"],
-            "error": "",
-            "updated_at": snapshot["updated_at"],
-        })
-
-    if snapshot["loading"] or started_refresh:
-        return jsonify({
-            "dialogs": [],
-            "cached": False,
-            "loading": True,
-            "error": "",
-            "updated_at": snapshot["updated_at"],
-        }), 202
-
-    if snapshot["error"]:
-        return jsonify({
-            "dialogs": [],
-            "cached": False,
-            "loading": False,
-            "error": snapshot["error"],
-            "updated_at": snapshot["updated_at"],
-        }), 503
-
-    return jsonify({
-        "dialogs": [],
-        "cached": False,
-        "loading": False,
-        "error": "对话列表暂不可用，请稍后重试",
-        "updated_at": snapshot["updated_at"],
-    }), 503
-
-
-@app.route("/api/search")
-def api_search():
-    query = request.args.get("q", "").strip()
-    if not query:
-        return jsonify({"error": "请输入搜索内容"}), 400
-        
-    # 智能链接嗅探解析
-    if "t.me/" in query:
-        m = re.search(r't\.me/(?:c/)?([^/\s\?]+)', query)
-        if m:
-            val = m.group(1)
-            # 如果是纯数字（私密频道的 ID）
-            if val.isdigit():
-                query = int("-100" + val)
-            elif val.startswith("+") or val == "joinchat":
-                return jsonify({"error": "暂不支持直接嗅探私密邀请链接，请先加入群组"}), 400
-            else:
-                query = val
-
-    try:
-        entity = run_async(lambda: tg_client.get_entity(query))
-        name = getattr(entity, "title", None) or getattr(entity, "first_name", str(query))
-        with cache_lock:
-            _current_entity_cache["search_entity"] = entity
-            _current_entity_cache["search_name"] = name
-        return jsonify({"name": name, "id": getattr(entity, "id", 0), "source": "search"})
-    except Exception as e:
-        return jsonify({"error": f"解析失败: {str(e)}"}), 500
-
-
-
-
-@app.route("/api/debug")
-def api_debug():
-    debug_error = _abort_if_debug_disabled()
-    if debug_error is not None:
-        return debug_error
-    payload, status = telegram_debug_service.inspect_messages(request.args.get("dialog_index", type=int), limit=20)
-    return jsonify(payload), status
-
-
-@app.route("/api/debug_replies")
-def api_debug_replies():
-    debug_error = _abort_if_debug_disabled()
-    if debug_error is not None:
-        return debug_error
-    payload, status = telegram_debug_service.inspect_messages(
-        request.args.get("dialog_index", type=int),
-        limit=20,
-        reply_to=request.args.get("post_id", type=int),
-    )
-    return jsonify(payload), status
-
-
-
-@app.route("/api/debug_full")
-def api_debug_full():
-    debug_error = _abort_if_debug_disabled()
-    if debug_error is not None:
-        return debug_error
-    payload, status = telegram_debug_service.inspect_full_messages(request.args.get("dialog_index", type=int))
-    return jsonify(payload), status
-
 # === 插入位置 ===
-
-@app.route("/api/videos")
-def api_videos():
-    dialog_index = request.args.get("dialog_index", type=int)
-    entity_id = request.args.get("entity_id", type=int)
-    source = request.args.get("source", "dialog")
-    limit = request.args.get("limit", 100, type=int)
-    include_replies = request.args.get("include_replies", "false") == "true"
-    reply_post_limit = min(max(request.args.get("reply_post_limit", 50, type=int), 0), 500)
-    refresh = request.args.get("refresh", "false") == "true"
-
-    try:
-        payload, status = telegram_video_service.list_videos(
-            dialog_index=dialog_index,
-            entity_id=entity_id,
-            source=source,
-            limit=limit,
-            include_replies=include_replies,
-            reply_post_limit=reply_post_limit,
-            refresh=refresh,
-        )
-        return jsonify(payload), status
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/api/video_search")
-def api_video_search():
-    query = request.args.get("q", "").strip()
-    dialog_index = request.args.get("dialog_index", type=int)
-    entity_id = request.args.get("entity_id", type=int)
-    source = request.args.get("source", "dialog")
-    limit = min(max(request.args.get("limit", 200, type=int), 10), 1000)
-    scan_limit = min(max(request.args.get("scan_limit", 1000, type=int), limit), 5000)
-    include_comments = request.args.get("include_comments", "true") == "true"
-    comment_post_limit = min(max(request.args.get("comment_post_limit", 80, type=int), 0), 300)
-    comment_limit = min(max(request.args.get("comment_limit", 100, type=int), 10), 300)
-
-    try:
-        payload, status = telegram_video_service.search_videos(
-            query=query,
-            dialog_index=dialog_index,
-            entity_id=entity_id,
-            source=source,
-            limit=limit,
-            scan_limit=scan_limit,
-            include_comments=include_comments,
-            comment_post_limit=comment_post_limit,
-            comment_limit=comment_limit,
-        )
-        return jsonify(payload), status
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/api/replies")
-def api_replies():
-    entity_id = request.args.get("entity_id", type=int)
-    post_id = request.args.get("post_id", type=int)
-    limit = min(max(request.args.get("limit", 100, type=int), 10), 300)
-    refresh = request.args.get("refresh", "false") == "true"
-    if not entity_id or not post_id:
-        return jsonify({"error": "缺少参数"}), 400
-    
-    try:
-        payload, status = telegram_video_service.list_replies(
-            entity_id=entity_id,
-            post_id=post_id,
-            limit=limit,
-            refresh=refresh,
-        )
-        return jsonify(payload), status
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/api/thumb/<int:msg_id>")
-def api_thumb(msg_id):
-    entity_id = request.args.get("entity", type=int)
-    thumb_path = thumbnail_cache_path(THUMB_DIR, entity_id, msg_id)
-    if os.path.exists(thumb_path):
-        return send_file(thumb_path, mimetype="image/jpeg")
-    message = _get_cached_message(msg_id, entity_id)
-    if not message:
-        return Response(status=404)
-    try:
-        data = run_async(lambda: tg_client.download_media(message, file=bytes, thumb=-1), allow_reconnect=False)
-        if not data:
-            return Response(status=404)
-        write_thumbnail(THUMB_DIR, entity_id, msg_id, data)
-        return Response(data, mimetype="image/jpeg")
-    except Exception:
-        return Response(status=404)
-
-
-@app.route("/api/online-play-url")
-def api_online_play_url():
-    entity_id = request.args.get("entity_id", type=int)
-    msg_id = request.args.get("msg_id", type=int)
-    file_name = request.args.get("filename", "").strip()
-    if entity_id is None or msg_id is None:
-        return jsonify({"error": "缺少消息标识"}), 400
-    if not RELAY_TOKEN_SECRET:
-        return jsonify({"error": "Relay 未配置，无法在线播放"}), 503
-    try:
-        if not file_name:
-            message = _resolve_message(entity_id, msg_id, force_refresh=True)
-            info = get_video_info(message) if message else None
-            if not info:
-                return jsonify({"error": "消息不包含可播放视频"}), 404
-            file_name = info["filename"]
-        return jsonify({
-            "ok": True,
-            "url": build_relay_url(entity_id, msg_id, file_name),
-            "filename": file_name,
-        })
-    except Exception as exc:
-        return jsonify({"error": str(exc)}), 500
-
-
-@app.route("/api/download", methods=["POST"])
-def api_download():
-    data = request.json or {}
-    message_ids = data.get("message_ids", [])
-    dialog_name = data.get("dialog_name", "unknown")
-    entity_id = data.get("entity_id") or _current_entity_cache.get("entity_id")
-    if not message_ids:
-        return jsonify({"error": "参数不完整"}), 400
-    if entity_id is None:
-        return jsonify({"error": "缺少对话 ID"}), 400
-    tasks = []
-    task_ids = {}
-    errors = []
-    for mid in message_ids:
-        task_id = _make_task_id(entity_id, mid)
-        if not task_id:
-            continue
-
-        existing_state = _copy_task_state(task_id)
-        if existing_state and existing_state.get("status") not in TERMINAL_STATES:
-            continue
-        msg = _get_cached_message(mid, entity_id)
-        if not msg:
-            try:
-                msg = _resolve_message(entity_id, mid)
-            except Exception:
-                msg = None
-        fname = "unknown"
-        info = None
-        if msg:
-            info = get_video_info(msg)
-            if info:
-                fname = info["filename"]
-        total_bytes = info.get("size") if info else 0
-        _set_task_state(task_id, {
-            "filename": fname,
-            "progress": 0,
-            "status": "submitting",
-            "downloaded": "0B" if total_bytes else "",
-            "total": format_size(total_bytes) if total_bytes else "",
-            "error": "",
-            "speed": "",
-            "msg_id": mid,
-            "entity_id": entity_id,
-            "dialog_name": dialog_name,
-            "downloaded_bytes": 0,
-            "total_bytes": total_bytes,
-            "speed_bps": 0.0,
-            "queue_position": None,
-            "queue_size": 0,
-            "downloader": "tdl" if _supports_tdl_download(entity_id) else "telegram",
-        })
-        _clear_download_cancelled(task_id)
-        tasks.append((task_id, mid, info))
-
-    if not tasks:
-        return jsonify({"error": "未找到可下载的消息，请刷新后重试"}), 400
-
-    global _last_download_dialog
-    _last_download_dialog = dialog_name
-    for task_id, mid, info in tasks:
-        try:
-            task_ids[task_id] = enqueue_download(task_id, entity_id, mid, dialog_name, info)
-        except Exception as exc:
-            errors.append(str(exc))
-            _update_task_state(
-                task_id,
-                status="error",
-                error=str(exc),
-                finish_time=time.time(),
-                speed="",
-                speed_bps=0.0,
-                queue_position=None,
-                queue_size=0,
-            )
-
-    if not task_ids and errors:
-        return jsonify({"error": errors[0]}), 502
-
-    return jsonify({
-        "status": "submitted",
-        "count": len(tasks),
-        "task_ids": task_ids,
-        "errors": errors,
-    })
-
-
-@app.route("/api/cancel", methods=["POST"])
-def api_cancel():
-    data = request.json or {}
-    task_id = data.get("task_id")
-    entity_id = data.get("entity_id")
-    msg_id = data.get("msg_id")
-    if not task_id and msg_id is not None and entity_id is not None:
-        task_id = _make_task_id(entity_id, msg_id)
-    if task_id:
-        _mark_download_cancelled(task_id)
-        remove_from_queue(task_id)
-        state = _copy_task_state(task_id) or {}
-        proc = _get_tdl_process(task_id)
-        if proc and proc.poll() is None:
-            try:
-                proc.terminate()
-            except Exception as exc:
-                log_warning(f"[{task_id}] tdl cancel failed: {exc}")
-        _update_task_state(
-            task_id,
-            status="cancelled",
-            error="已取消",
-            speed="",
-            speed_bps=0.0,
-            queue_position=None,
-            queue_size=0,
-        )
-    return jsonify({"ok": True})
-
-
-@app.route("/api/retry", methods=["POST"])
-def api_retry():
-    _recover_stalled_tasks()
-    data = request.json or {}
-    task_id = data.get("task_id")
-    dialog_name = data.get("dialog_name") or _last_download_dialog
-    entity_id = data.get("entity_id")
-    msg_id = data.get("msg_id")
-
-    if task_id:
-        eid, mid = _parse_task_id(task_id)
-        if entity_id is None:
-            entity_id = eid
-        if msg_id is None:
-            msg_id = mid
-    elif msg_id is not None and entity_id is not None:
-        task_id = _make_task_id(entity_id, msg_id)
-    elif msg_id is not None:
-        with status_lock:
-            status_items = list(download_status.items())
-        for tid, info in status_items:
-            if info.get("msg_id") == msg_id:
-                task_id = tid
-                if entity_id is None:
-                    entity_id = info.get("entity_id")
-                if not dialog_name:
-                    dialog_name = info.get("dialog_name", dialog_name)
-                break
-
-    if not task_id or entity_id is None or msg_id is None:
-        return jsonify({"error": "消息未找到"}), 400
-
-    try:
-        return jsonify(_resume_task(task_id, dialog_name=dialog_name, auto=False))
-    except Exception as exc:
-        _update_task_state(task_id, status="error", error=str(exc), finish_time=time.time())
-        return jsonify({"error": str(exc)}), 500
-
-
-@app.route("/api/retry_all", methods=["POST"])
-def api_retry_all():
-    result = _resume_all_incomplete_tasks(auto=False)
-    return jsonify({"ok": True, **result})
-
-
-@app.route("/api/queue_action", methods=["POST"])
-def api_queue_action():
-    data = request.json or {}
-    task_id = data.get("task_id")
-    action = data.get("action")
-    if not task_id or action not in {"pause", "resume", "delete", "top", "up", "down"}:
-        return jsonify({"error": "参数不完整"}), 400
-    state = _copy_task_state(task_id) or {}
-    if action == "resume":
-        try:
-            return jsonify(_resume_task(task_id, auto=False))
-        except Exception as exc:
-            return jsonify({"error": str(exc)}), 500
-    if action in {"top", "up", "down"}:
-        if not move_queued_task(task_id, action):
-            return jsonify({"error": "任务不在等待队列中"}), 409
-        return jsonify({"ok": True})
-    if state.get("status") == "downloading":
-        return jsonify({"error": "下载中的任务请使用取消，已下载部分会保留"}), 409
-    remove_from_queue(task_id)
-    if action == "pause":
-        _update_task_state(task_id, status="paused", error="已暂停", speed="", speed_bps=0.0, queue_position=None, queue_size=0)
-        return jsonify({"ok": True})
-    _drop_task_state(task_id)
-    _clear_download_cancelled(task_id)
-    _clear_tdl_error(task_id)
-    clear_resume_info(task_id)
-    return jsonify({"ok": True})
-
-
-@app.route("/api/recovery_candidates")
-def api_recovery_candidates():
-    return jsonify({"candidates": _log_recovery_candidates(request.args.get("limit", 200, type=int))})
-
-
-@app.route("/api/recover_candidates", methods=["POST"])
-def api_recover_candidates():
-    data = request.json or {}
-    task_ids = data.get("task_ids") or []
-    dialog_name = data.get("dialog_name") or "日志恢复"
-    return jsonify(recover_tasks_from_candidates(task_ids, dialog_name=dialog_name))
-
-
-@app.route("/api/history")
-def api_history():
-    page = request.args.get("page", 1, type=int)
-    per_page = request.args.get("per_page", 30, type=int)
-    return jsonify(get_task_history_payload(
-        status=request.args.get("status", "").strip(),
-        query=request.args.get("q", "").strip(),
-        page=page,
-        per_page=per_page,
-    ))
 
 
 def clear_tasks_for_scope(scope="terminal"):
@@ -2304,20 +1766,6 @@ def get_download_status_payload():
         drop_task_state=_drop_task_state,
         get_queue_status=get_queue_status,
     )
-
-
-@app.route("/api/download_status")
-def api_download_status():
-    return jsonify(get_download_status_payload())
-
-
-@app.route("/api/clear_tasks", methods=["POST"])
-def api_clear_tasks():
-    data = request.json or {}
-    task_ids = data.get("task_ids")
-    if task_ids is not None:
-        return jsonify(clear_task_ids(task_ids))
-    return jsonify({"ok": True, "cleared": clear_tasks_for_scope("terminal"), "skipped": 0})
 
 
 telegram_direct_downloader = None
@@ -2425,176 +1873,14 @@ def get_download_worker():
     return download_worker
 
 
-@app.route("/api/progress")
-def api_progress():
-    def snapshot():
-        try:
-            # list() 防止迭代期间字典被其他线程修改导致 RuntimeError
-            with status_lock:
-                tasks = {key: dict(value) for key, value in list(download_status.items())}
-        except Exception:
-            tasks = {}
-        complete = bool(tasks) and all(
-            state.get("status") in TERMINAL_STATES for state in tasks.values()
-        )
-        return {
-            "tasks": tasks,
-            "queue": get_queue_status(),
-            "complete": complete,
-            "timestamp": time.time(),
-        }
-
-    def generate():
-        while True:
-            try:
-                payload = snapshot()
-                yield f"data: {json.dumps(payload)}\n\n"
-                if payload["complete"]:
-                    break
-            except Exception:
-                break
-            time.sleep(0.8)
-
-    return Response(
-        generate(),
-        mimetype="text-event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
-
-
 def _do_download(task_items, dialog_name):
     return get_download_worker().run(task_items, dialog_name)
-
-
-@app.route("/api/stream/<path:filepath>")
-def api_stream(filepath):
-    """流式传输视频文件用于浏览器预览"""
-    try:
-        full_path = resolve_file_path(DOWNLOAD_DIR, filepath)
-    except ValueError:
-        return jsonify({"error": "非法路径"}), 403
-    except FileNotFoundError:
-        return jsonify({"error": "文件不存在"}), 404
-
-    file_size = os.path.getsize(full_path)
-    rel_path = os.path.relpath(full_path, os.path.realpath(DOWNLOAD_DIR))
-    rel_parts = rel_path.split(os.sep, 1)
-    if len(rel_parts) == 2:
-        block_reason = _download_file_play_block_reason(rel_parts[0], rel_parts[1], file_size)
-        if block_reason:
-            return jsonify({"error": block_reason}), 409
-    try:
-        stream_range = local_stream_range(file_size, request.headers.get("Range"))
-    except ValueError:
-        return jsonify({"error": "invalid range"}), 416
-
-    if stream_range:
-        return Response(
-            iter_file_chunks(full_path, stream_range["start"], stream_range["content_length"]),
-            status=206,
-            mimetype="video/mp4",
-            headers={
-            "Content-Range": stream_range["content_range"],
-            "Content-Length": stream_range["content_length"],
-            "Accept-Ranges": "bytes",
-            },
-        )
-    else:
-        return send_from_directory(os.path.dirname(full_path), os.path.basename(full_path),
-                                   mimetype="video/mp4")
 
 
 # Relay 并发控制
 MAX_CONCURRENT_RELAYS = 2
 active_relays = 0
 relay_lock = threading.Lock()
-
-@app.route("/relay/<signed_int:entity_id>/<int:msg_id>")
-def relay_media(entity_id, msg_id):
-    global active_relays
-    if not RELAY_TOKEN_SECRET:
-        return jsonify({"error": "relay token secret is not configured"}), 503
-
-    # 并发限制检查
-    with relay_lock:
-        if active_relays >= MAX_CONCURRENT_RELAYS:
-            log_warning(f"[relay:{entity_id}:{msg_id}] 并发数已达上限 {MAX_CONCURRENT_RELAYS}，请降低并发请求数")
-            return jsonify({"error": "relay concurrency limit reached"}), 503
-        active_relays += 1
-
-    try:
-        file_name = request.args.get("file_name", "")
-        token = request.args.get("token", "")
-        if not file_name or not token:
-            return jsonify({"error": "missing relay parameters"}), 400
-
-        verify_relay_token(
-            secret=RELAY_TOKEN_SECRET,
-            token=token,
-            entity_id=entity_id,
-            message_id=msg_id,
-            file_name=file_name,
-            now_ts=int(time.time()),
-        )
-
-        media = get_relay_media(entity_id, msg_id)
-        if media.get("file_name") != file_name:
-            return jsonify({"error": "file name mismatch"}), 403
-
-        total_size = int(media.get("size") or 0)
-        start_offset, end_offset, status_code = _parse_range(request.headers.get("Range"), total_size)
-        content_length = end_offset - start_offset + 1
-        headers = {
-            "Accept-Ranges": "bytes",
-            "Content-Length": str(content_length),
-            "Content-Disposition": f"inline; filename*=UTF-8''{quote(file_name)}",
-        }
-        if status_code == 206:
-            headers["Content-Range"] = f"bytes {start_offset}-{end_offset}/{total_size}"
-
-        def _generate_with_cleanup():
-            try:
-                for chunk in iter_relay_bytes(media, start_offset, end_offset):
-                    yield chunk
-            finally:
-                global active_relays
-                with relay_lock:
-                    active_relays = max(0, active_relays - 1)
-                log_info(f"[relay:{entity_id}:{msg_id}] 传输结束，释放槽位 (当前活跃: {active_relays})")
-
-        return Response(
-            _generate_with_cleanup(),
-            status=status_code,
-            mimetype=media.get("mime_type") or "application/octet-stream",
-            headers=headers,
-        )
-    except Exception as exc:
-        with relay_lock:
-            active_relays = max(0, active_relays - 1)
-        log_error(f"[relay:{entity_id}:{msg_id}] relay route failed: {exc}")
-        if "token" in str(exc).lower():
-            return jsonify({"error": str(exc)}), 403
-        return jsonify({"error": str(exc)}), 502
-
-
-@app.route("/api/files")
-def api_files():
-    page = max(request.args.get("page", default=1, type=int) or 1, 1)
-    per_page = min(max(request.args.get("per_page", default=100, type=int) or 100, 10), 500)
-    payload = list_download_files(DOWNLOAD_DIR, format_size, page, per_page)
-    payload["files"] = [_annotate_download_file_item(item) for item in payload.get("files", [])]
-    return jsonify(payload)
-
-
-@app.route("/api/file/<path:filepath>")
-def api_file_download(filepath):
-    try:
-        full_path = resolve_file_path(DOWNLOAD_DIR, filepath)
-    except ValueError:
-        return jsonify({"error": "非法路径"}), 403
-    except FileNotFoundError:
-        return jsonify({"error": "文件不存在"}), 404
-    return send_from_directory(os.path.dirname(full_path), os.path.basename(full_path), as_attachment=True)
 
 
 def start_tg_client():

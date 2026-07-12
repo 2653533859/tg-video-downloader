@@ -57,7 +57,8 @@
 - [x] 随删除闭环的代码修改：config.py 移除 `ARIA2_*` 块（aria2 批次遗留项闭环）；3 处"请先运行 downloader.py 登录"报错指引改为 login.py（app.py:1680、src/telegram/startup.py:41、src/telegram/runtime.py:107）及对应测试断言。
 - [x] 重写 CLAUDE.md（按当前真实结构：入口委托关系、src/ 模块地图、真实状态名、5003 端口、无 aria2）；AGENTS.md 同步为镜像；README.md 全量重写（原文约七成引用已删文件或失实——Prometheus 端点不存在、"100% 覆盖"等，超出原定"仅修段落"范围）；tests/README.md、docs/WEBSOCKET_GUIDE.md 修正残留引用。
 - 验收结果：pytest **87 passed / 0 failed**（较 112 减少 25 个 = 被删死模块的测试数，属预期）；app_new 隔离环境冒烟导入成功、32 条路由、关键路由抽查通过；全仓库无已删模块的 import 残留。
-- [ ] **P1-5b（下一批）**：摘除 app.py 中 33 个从未 serve 的 `@app.route` 装饰器与重复路由函数体（部分函数被 app_new 反向引用，需逐函数分析）；精简 app_new.py 每个 Blueprint 20-30 个参数的手工注入，改为传 runtime/服务对象。
+- [x] **P1-5b-1 ✅（2026-07-13 完成）**：用 ast 脚本精确摘除 app.py 死路由——32 个整函数（含 `enforce_access_control`/`index`）、2 个仅摘装饰器（`api_get_proxy_settings`/`api_set_proxy_settings`，函数体被 app_new 以 runtime 前缀调用故保留）、`app = Flask(__name__)` 实例、`url_map` 注册、孤立的 `SignedIntConverter` 类与未使用 flask 导入。app.py 从 2654 行减至 **1940 行**。验收：pytest 87 全绿、冒烟导入路由数 32 不变、关键路由抽查通过、无 `@app` 残留。逐函数引用分析确认 src/routes/ 的同名函数是独立 Blueprint 实现而非引用。
+- [ ] **P1-5b-2（待做）**：精简 app_new.py 每个 Blueprint 20-30 个参数的手工注入，改为传 runtime/服务对象（接口设计变更，单独成批）。
 
 ### 6. 重构下载调度和线程生命周期
 
