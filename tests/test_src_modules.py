@@ -1247,8 +1247,8 @@ class TestTelegramStartup:
         finally:
             loop.close()
 
-        assert runtime.connect_error == "Telegram 未登录！请先运行 downloader.py 完成登录。"
-        assert errors == ["Telegram 未登录！请先运行 downloader.py 完成登录。"]
+        assert runtime.connect_error == "Telegram 未登录！请先运行 login.py 完成登录。"
+        assert errors == ["Telegram 未登录！请先运行 login.py 完成登录。"]
 
     def test_run_main_telegram_client_retries_on_connect_error(self):
         from src.telegram import run_main_telegram_client

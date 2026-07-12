@@ -72,12 +72,6 @@ RELAY_TOKEN_SECRET = os.getenv("RELAY_TOKEN_SECRET", "").strip()
 RELAY_TOKEN_TTL = int(os.getenv("RELAY_TOKEN_TTL", "1800") or "1800")
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").strip()
 
-# 已废弃的 aria2 配置：当前生产入口（app.py）不再支持 aria2 下载通道，
-# 仅 app_legacy.py / app_async.py 旧入口仍在 import。待 P1-5 归档旧入口时一并删除。
-ARIA2_RPC_URL = os.getenv("ARIA2_RPC_URL", "http://127.0.0.1:6800/jsonrpc").strip()
-ARIA2_SECRET = os.getenv("ARIA2_SECRET", "").strip()
-ARIA2_DOWNLOAD_DIR = os.getenv("ARIA2_DOWNLOAD_DIR", "/downloads").strip() or "/downloads"
-
 # tdl 直连下载配置
 TDL_BINARY = os.getenv("TDL_BINARY", "/usr/local/bin/tdl").strip() or "/usr/local/bin/tdl"
 TDL_NAMESPACE = os.getenv("TDL_NAMESPACE", "default").strip() or "default"

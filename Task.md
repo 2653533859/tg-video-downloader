@@ -49,18 +49,15 @@
 
 ## P1：收敛入口与清理死代码
 
-### 5. 收敛唯一生产入口
+### 5. 收敛唯一生产入口 ✅（2026-07-13 完成，遗留 P1-5b）
 
-- [ ] 决定唯一入口：要么让容器改跑 `app_new.py`（Blueprint 路由已完整覆盖），删除 app.py 中 33 个重复路由定义；要么放弃 Blueprint 层。当前两套完整 Flask 应用并存，任何路由修改都要改两处（DRY 违反）。
-- [ ] 归档/删除确认无引用的历史入口和孤立文件（已核实无生产引用）：
-  - 历史入口：`app_legacy.py`（4065 行）、`app_modular.py`、`app_async.py`、`app.py.pre_fix_20260217_2230`
-  - 孤立补丁文件：`watchdog_patch.py`、`telegram_health_check.py`、`patch.py`、`fix_tg_health_init.py`、`apply_watchdog.py`、`apply_health_checks.py`、`patches/` 目录
-  - 孤立工具：`downloader.py`、`healthcheck.py`、`docker_healthcheck.py`、`host_watchdog.py`（`login.py` 是手动登录工具，保留但注明用途）
-  - 仅测试引用的模块：`database.py`、`metrics.py`（与任务 4 联动决策）
-- [ ] 更新 CLAUDE.md / AGENTS.md：两者是彼此拷贝且描述的是 4000 行旧结构，状态名、行号、"aria2_client/relay_tokens 缺失"等描述全部过时。
-- [ ] 精简 app_new.py 的依赖注入：每个 Blueprint 用 20-30 个函数参数手工注入（app_new.py:64-159），改为传入 runtime/服务对象。
-- 验收：生产启动命令只有一个；每个路由只有一份定义；文档与代码一致。
-- 相关文件：`app.py`、`app_new.py`、`Dockerfile`、`CLAUDE.md`、`AGENTS.md`。
+- 关键更正：核查 `app.py` 完整 `__main__` 块（app.py:2646-2654）后确认，`python app.py` 实际委托 `app_new` 装配 Blueprint 并 serve **`app_new.app`**——入口事实上早已收敛，与远程现网结构一致（.sync-backups 备份核对），**无需改 Dockerfile CMD，现网零影响**。app.py 自己的 Flask 实例（L125）及其 33 个 `@app.route` 从未被 serve，属死代码。
+- [x] **git init 兜底**（用户选定方式）：加固 .gitignore（补 logs/.resume/.task_state/.sync-backups/.pytest_cache/.DS_Store）→ 快照提交 → 发现 `api.md` 含真实 Telegram API 凭据，已删除并 amend 出 git 历史（全历史扫描确认零残留）。
+- [x] 删除死文件约 40 项（快照提交可恢复）：4 个历史入口、5 个补丁文件 + patches/ 目录、3 个孤立工具（quick_start.sh 实为无关的 1Panel 安装器）、database.py / metrics.py 及其测试、start_async.sh / requirements-async.txt、约 20 个历史总结文档（根目录 7 + docs/ 12 + DOWNLOAD.md）。
+- [x] 随删除闭环的代码修改：config.py 移除 `ARIA2_*` 块（aria2 批次遗留项闭环）；3 处"请先运行 downloader.py 登录"报错指引改为 login.py（app.py:1680、src/telegram/startup.py:41、src/telegram/runtime.py:107）及对应测试断言。
+- [x] 重写 CLAUDE.md（按当前真实结构：入口委托关系、src/ 模块地图、真实状态名、5003 端口、无 aria2）；AGENTS.md 同步为镜像；README.md 全量重写（原文约七成引用已删文件或失实——Prometheus 端点不存在、"100% 覆盖"等，超出原定"仅修段落"范围）；tests/README.md、docs/WEBSOCKET_GUIDE.md 修正残留引用。
+- 验收结果：pytest **87 passed / 0 failed**（较 112 减少 25 个 = 被删死模块的测试数，属预期）；app_new 隔离环境冒烟导入成功、32 条路由、关键路由抽查通过；全仓库无已删模块的 import 残留。
+- [ ] **P1-5b（下一批）**：摘除 app.py 中 33 个从未 serve 的 `@app.route` 装饰器与重复路由函数体（部分函数被 app_new 反向引用，需逐函数分析）；精简 app_new.py 每个 Blueprint 20-30 个参数的手工注入，改为传 runtime/服务对象。
 
 ### 6. 重构下载调度和线程生命周期
 

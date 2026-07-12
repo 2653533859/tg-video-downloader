@@ -46,14 +46,13 @@ pytest --lf
 
 - `conftest.py`: 共享的 fixtures 和测试配置
 - `test_relay_tokens.py`: relay token 生成和验证测试
-- `test_aria2_client.py`: legacy aria2 客户端单元测试，仅覆盖旧入口兼容模块
+- `test_src_modules.py`: src/ 模块（路由、下载、安全、状态等）单元测试
 
 ## Mock 数据
 
 测试使用 `unittest.mock` 和 `pytest-mock` 来模拟外部依赖：
 
 - Telegram API 调用
-- legacy aria2 RPC 调用
 - 文件系统操作
 - 网络请求
 

@@ -104,7 +104,7 @@ class TelegramRuntime:
                 async def _reconnect():
                     await self.client.connect()
                     if not await self.client.is_user_authorized():
-                        raise Exception("Telegram 未登录，请先运行 downloader.py 登录。")
+                        raise Exception("Telegram 未登录，请先运行 login.py 登录。")
                     user = await self.client.get_me()
                     return self.format_user_display(user)
 

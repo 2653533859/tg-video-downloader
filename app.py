@@ -1677,7 +1677,7 @@ def _apply_proxy_type(proxy_type):
             client = TelegramClient(SESSION_NAME, API_ID, API_HASH, loop=tg_loop, proxy=new_telethon_proxy)
             await client.connect()
             if not await client.is_user_authorized():
-                raise Exception("Telegram 未登录，请先运行 downloader.py 完成登录。")
+                raise Exception("Telegram 未登录，请先运行 login.py 完成登录。")
             user = await client.get_me()
             return client, _format_user_display(user)
 

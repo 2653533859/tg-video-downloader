@@ -38,7 +38,7 @@ def run_main_telegram_client(
             )
 
             if not loop.run_until_complete(client.is_user_authorized()):
-                error_message = "Telegram 未登录！请先运行 downloader.py 完成登录。"
+                error_message = "Telegram 未登录！请先运行 login.py 完成登录。"
                 runtime.mark_error(error_message)
                 on_error(error_message)
                 print_func(f"错误: {error_message}")

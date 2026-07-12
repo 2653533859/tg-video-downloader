@@ -259,7 +259,7 @@ class WebSocketManager:
 
 ### 2.2 集成到主应用
 
-**修改 `app_async.py`**:
+**修改主应用入口**（注：本指南原基于已移除的 Quart 实验入口 `app_async.py` 编写，实施时需适配当前 Flask 入口 `app_new.py`，参见 Task.md 关于全异步架构的说明）:
 
 ```python
 from src.websocket.manager import WebSocketManager
