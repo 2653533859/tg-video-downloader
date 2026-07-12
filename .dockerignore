@@ -1,0 +1,22 @@
+.git
+__pycache__/
+*.pyc
+.thumbs/
+.resume/
+logs/
+downloads/
+*.bak
+*.bak_*
+*.pre_fix_*
+1panel-v1.10.34-lts-linux-amd64/
+1panel-v1.10.34-lts-linux-amd64.tar.gz
+tests/__pycache__/
+# 敏感文件：严禁打进镜像
+.env
+*.session
+*.session-journal
+# 本地状态与备份目录
+.task_state/
+.sync-backups/
+.pytest_cache/
+.DS_Store

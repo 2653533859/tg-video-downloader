@@ -1,0 +1,129 @@
+# 项目优化任务清单
+
+> 基于 2026-07-12 的代码结构核查、架构分析、实际测试运行和安全扫描整理。
+> 本文只记录优化方向和验收标准，不代表任务已经完成。
+
+## 当前基线（已核实的事实）
+
+- **生产入口是单体 `app.py`（2651 行）**：Dockerfile:9 `CMD ["python", "app.py"]`，容器实际运行的是 app.py 自带的 33 个 `@app.route` 路由；`app_new.py` 的 Blueprint 装配层虽然路由覆盖已完整（31 个 Blueprint 路由 + 2 个 proxy settings 路由），但**未被容器使用**。
+- app.py 已大量委托 `src/` 模块（DownloadScheduler、TelegramRuntime、TaskStatePersistence 等约 6400 行模块化代码），自身退化为"外观层 + 路由 + 全局状态容器"，但同一套路由在 app.py 和 src/routes/ 各维护一份。
+- 测试基线：`PYTHONPATH=. pytest -q` 为 **112 passed, 8 failed**（0.54s，120 个测试收集无错误）；8 个失败全部在 `tests/test_aria2_client.py`，根因是测试针对一个"基于 requests 的另一版 Aria2Client"编写，与仓库实现（urllib）完全脱节。
+- 任务终态实际为 `done / skipped / error / cancelled`（app.py:161 `TERMINAL_STATES`），CLAUDE.md / AGENTS.md 中描述的 `completed / failed` 状态名、"~4000 行 app.py"、以及大量行号均已过时。
+- 本机 Python 3.14.5，Dockerfile 基础镜像 python:3.10-slim，存在版本差异。
+
+## P0：先修复正确性与安全问题
+
+### 1. 修复配置冲突导致的启动崩溃 ✅（2026-07-12 完成）
+
+- [x] **代理类型冲突（最高优先级）**：docker-compose.yml、.env.example、实际 .env 的 `TG_PROXY_TYPE` 已统一为 `http`（config.py 唯一支持的类型）；`normalize_proxy_type` 报错信息补充了可选值提示。
+- [x] **端口统一到 5003**（用户已确认方向）：config.py 默认 5003、Dockerfile `EXPOSE 5003`、healthcheck.sh 默认 5003、compose 保持 5003。
+- [x] PUBLIC_BASE_URL：compose 中硬编码的内网 IP `192.168.66.23` 已移除（默认空）；.env / .env.example 对齐为 `http://localhost:5003`。
+- [x] Dockerfile 增加 `HEALTHCHECK` 指令、compose 增加 `healthcheck` 块，均指向 `healthcheck.sh`（从环境变量读取凭据和端口）。
+- 验收结果：`import config` 正常、compose YAML 校验通过、`pytest` 无新增失败（112 passed / 8 failed 与基线一致，失败项全部属任务 4）。
+
+### 2. 清理凭据泄露和危险默认值 ✅（2026-07-12 完成，剩凭据轮换需人工）
+
+- [x] 删除含硬编码明文凭据的 4 个孤立文件：`docker_healthcheck.sh`、`docker_healthcheck.py`、`healthcheck.py`、`patch.py`（均已核实无生产引用）；5 个历史文档中的真实凭据已替换为占位符。全仓库扫描无残留。
+- [x] **修复 .dockerignore**：新增排除 `.env`、`*.session`、`*.session-journal`、`.task_state/`、`.sync-backups/` 等——镜像不再打包密钥和 Telegram 会话。
+- [x] 移除 compose 中 `RELAY_TOKEN_SECRET:-change-me` 弱默认（改为空默认=禁用 relay）；实际 `.env` 中的占位密钥已替换为随机 64 位十六进制值。
+- [ ] **人工待办：轮换已泄露的 Web 凭据**——该组用户名/密码曾硬编码在多个文件中，如果现网（如 5003 端口的部署）仍在使用这组凭据，请立即修改 `WEB_AUTH_PASSWORD`。另外当前 `.env` 中 `WEB_AUTH_PASSWORD=admin` 过弱，建议一并改强。
+- [ ] 为 relay token secret 增加最小长度校验（后续批次，改 config.py 校验逻辑）。
+- 相关文件：`.dockerignore`、`docker-compose.yml`、`.env`、`docs/*.md`。
+
+### 3. 修复 X-Forwarded-For 认证绕过 ✅（2026-07-12 完成）
+
+- [x] 新增配置项 `TRUST_FORWARDED_FOR`（默认 false）：`request_ip_is_local` / `web_auth_failure_kind` / `require_web_auth` 均增加 `trust_forwarded` 参数——默认忽略 `X-Forwarded-For`，只用 `remote_addr` 判定本地；部署在可信反向代理后可显式开启。
+- [x] 两个入口的调用点均已接线：app.py（`current_request_is_local`、`_require_web_auth`）与 app_new.py（`before_request`）。
+- [x] 更新测试：原先断言可伪造行为的用例改为断言安全行为，并新增"绑定 127.0.0.1 时伪造 XFF 返回 forbidden"回归用例（TestAccessControl 3 项全过）。
+- 说明：目录遍历方面未发现问题——`/api/stream`、`/api/file` 均经 `resolve_file_path`（realpath + commonpath 校验），无需改动。
+- 相关文件：`src/security/access.py`、`src/security/flask_access.py`、`config.py`、`app.py`、`app_new.py`、`tests/test_src_modules.py`。
+
+### 4. 处理 aria2：废弃清理 ✅（2026-07-13 完成，用户已确认方案 2）
+
+- 决策背景：核查确认 aria2 下载通道在模块化迁移时已丢失——当前生产入口 app.py / src / 前端中 aria2 引用为 0，完整流程只残留在 `app_legacy.py`。用户确认不恢复（tdl 多线程直连速度优于 aria2 经 relay 中转），走废弃分支。
+- [x] 删除 `aria2_client.py`（生产零引用）和 `tests/test_aria2_client.py`（8 个失败测试全在此，测的是不存在的 requests 版实现）。
+- [x] 从 `docker-compose.yml`、`.env`、`.env.example` 移除 `ARIA2_*` 配置；relay 段（PUBLIC_BASE_URL / RELAY_TOKEN_SECRET / RELAY_TOKEN_TTL）保留并改标题为"Relay 配置（在线播放）"——在线播放功能仍依赖 relay。
+- [x] `config.py` 的 `ARIA2_*` 变量暂留（app_legacy.py 仍 import，删除会 ImportError），注释标注"待 P1-5 随旧入口移除"。
+- 验收结果：**`pytest -q` 112 passed / 0 failed**（此前 8 个失败全部消除）；config 加载、两入口编译、compose YAML 均通过；生产代码与前端 aria2 零残留。
+- 遗留：`database.py` / `metrics.py` 的去留与 aria2 无关，留到 P1-5 死代码清理统一决策；`requirements.txt` 中 `PySocks` 未固定版本，随任务 10（容器与 CI）一并处理；`pytest.ini` 固定 pythonpath 已在任务 11 覆盖。
+
+## P1：收敛入口与清理死代码
+
+### 5. 收敛唯一生产入口
+
+- [ ] 决定唯一入口：要么让容器改跑 `app_new.py`（Blueprint 路由已完整覆盖），删除 app.py 中 33 个重复路由定义；要么放弃 Blueprint 层。当前两套完整 Flask 应用并存，任何路由修改都要改两处（DRY 违反）。
+- [ ] 归档/删除确认无引用的历史入口和孤立文件（已核实无生产引用）：
+  - 历史入口：`app_legacy.py`（4065 行）、`app_modular.py`、`app_async.py`、`app.py.pre_fix_20260217_2230`
+  - 孤立补丁文件：`watchdog_patch.py`、`telegram_health_check.py`、`patch.py`、`fix_tg_health_init.py`、`apply_watchdog.py`、`apply_health_checks.py`、`patches/` 目录
+  - 孤立工具：`downloader.py`、`healthcheck.py`、`docker_healthcheck.py`、`host_watchdog.py`（`login.py` 是手动登录工具，保留但注明用途）
+  - 仅测试引用的模块：`database.py`、`metrics.py`（与任务 4 联动决策）
+- [ ] 更新 CLAUDE.md / AGENTS.md：两者是彼此拷贝且描述的是 4000 行旧结构，状态名、行号、"aria2_client/relay_tokens 缺失"等描述全部过时。
+- [ ] 精简 app_new.py 的依赖注入：每个 Blueprint 用 20-30 个函数参数手工注入（app_new.py:64-159），改为传入 runtime/服务对象。
+- 验收：生产启动命令只有一个；每个路由只有一份定义；文档与代码一致。
+- 相关文件：`app.py`、`app_new.py`、`Dockerfile`、`CLAUDE.md`、`AGENTS.md`。
+
+### 6. 重构下载调度和线程生命周期
+
+- [ ] 用固定 worker pool 替代每任务 `threading.Thread(daemon=True)`（app.py:647）；当前 `MAX_CONCURRENT_DOWNLOADS = 1`（app.py:488）靠 DownloadScheduler 计数槽位控制。
+- [ ] 简化 DownloadScheduler 的 `released_stalled_task_ids` 计数补偿逻辑（src/download/scheduler.py:89-117）：watchdog 释放槽位与正常完成释放之间用计数器对冲，难以推理且容易在异常路径下泄漏/超发槽位——改为显式的任务归属跟踪。
+- [ ] 明确任务状态机迁移表（done/skipped/error/cancelled 四个终态），禁止 watchdog 重启、用户取消、自动恢复互相覆盖终态。
+- [ ] 增加优雅退出：当前所有后台线程（双 Telegram 线程、队列处理器、watchdog、健康检查、缩略图清理、DB 备份）全是 daemon 线程，进程退出直接杀死，无清理路径——下载中的文件和状态可能不一致。
+- [ ] tdl 单实例 Bolt DB 约束做成调度器级资源锁，而非依赖 max_concurrent=1 的隐含行为。
+- 验收：并发提交、取消、重试、watchdog 恢复、进程重启恢复五类场景有集成测试。
+- 相关文件：`app.py`、`src/download/scheduler.py`、`src/download/worker.py`、`src/download/watchdog.py`。
+
+### 7. 收紧 Telegram 运行时的阻塞与缓存边界
+
+- [ ] `ensure_connection` 重连在 `reconnect_lock` 内同步等待最长 45s（src/telegram/runtime.py:111-114），期间触发它的 Flask 请求线程被阻塞——改为后台重连 + 快速失败返回。
+- [ ] `run_async` 超时后 `future.cancel()`（runtime.py:133-135）——验证协程真正被取消而非继续占用连接；为重连增加指数退避（当前固定 8s 窗口，runtime.py:84）。
+- [ ] `get_cached_message` 的兜底逻辑会全表扫描并可能返回**其他频道**同 msg_id 的消息（runtime.py:270-273）——跨 entity 返回错误消息会导致下错文件，改为要求 entity_id 匹配。
+- [ ] 缓存边界：messages_cache 有 2000 条上限、dialogs 缓存有 300s TTL（已实现），但 `videos_cache`、`replies_cache`、`current_entity_cache` 无容量/TTL 控制——补齐。
+- 验收：网络断开、代理不可用、API 超时、重连期间请求四类场景下不阻塞 Flask 线程、不泄漏线程、不串消息。
+- 相关文件：`src/telegram/runtime.py`、`src/telegram/health_checker.py`。
+
+### 8. 优化任务持久化层
+
+- [ ] `TaskStatePersistence.connect()` 每次操作新建 SQLite 连接并重复执行 3 个 `CREATE TABLE IF NOT EXISTS` + WAL PRAGMA（src/state/persistence.py:41-66）——改为连接复用/初始化一次 schema。
+- [ ] 移除 `enabled()` 中 `"unittest" not in sys.modules` 的测试感知逻辑（persistence.py:39-40）——生产代码不应感知测试环境，用依赖注入或配置开关代替。
+- [ ] 为状态写入增加节流，避免每次进度更新都提交事务；为 `task_history` 增加分页索引。
+- [ ] 增加 schema 版本号，规范备份一致性校验。
+- 验收：高频进度更新无明显锁等待；大历史量下分页延迟可控；备份可恢复。
+- 相关文件：`src/state/persistence.py`、`src/state/manager.py`。
+
+## P2：可观测性、部署与测试
+
+### 9. 让监控和健康检查真正可用
+
+- [ ] 确认 `/metrics` 现状：metrics.py 未被生产代码引用——要么接入 Prometheus endpoint，要么删除该模块和相关文档。
+- [ ] 为 health endpoint 区分 liveness / readiness / Telegram degraded / tdl degraded。
+- [ ] 统一结构化日志字段（task_id、entity_id、msg_id、downloader、状态、耗时、错误类型），配置日志轮转和敏感字段脱敏。
+- 相关文件：`metrics.py`、`src/system/status.py`、`healthcheck.sh`。
+
+### 10. 完善容器和 CI
+
+- [ ] Dockerfile 使用非 root 用户；固定基础镜像 digest；明确 session、tdl 数据、下载目录的权限边界。
+- [ ] 明确 Python 支持矩阵：本机 3.14 与容器 3.10 差异已在测试中暴露兼容问题，至少在 CI 中验证 3.10。
+- [ ] 增加 CI：lint、单元测试、Docker 构建、`docker compose config` 校验、镜像敏感文件扫描（防止 .env/session 再次进入镜像）。
+- 相关文件：`Dockerfile`、`docker-compose.yml`、`.github/workflows/*`。
+
+### 11. 建立分层测试体系
+
+- [ ] 为 Flask 路由增加 API 测试（鉴权、参数校验、错误码），当前 src/routes/ 只有少量覆盖。
+- [ ] 为下载 worker 增加不依赖真实 Telegram/tdl 的合同测试（resume、取消、重试、终态）。
+- [ ] 增加 SQLite 并发写入与崩溃恢复测试。
+- [ ] 安全回归测试：伪造 XFF、无 token relay、过期 token、路径遍历。
+- 验收：本地和 CI 同一条命令跑测试，单元/集成/冒烟可分层执行。
+
+## 建议实施顺序
+
+1. **P0-1/P0-2/P0-3**（半天级）：配置冲突、凭据清理、XFF 绕过——都是小改动但影响安全和"能不能启动"。
+2. **P0-4**（半天级）：决定 aria2_client/database/metrics 三个孤立模块去留，测试恢复全绿。
+3. **P1-5**（一两天）：定唯一入口 + 删除已核实的死文件（约 15 个文件/目录），这一步会让后续所有工作只改一处。
+4. **P1-6/7/8**（按周计）：调度器、Telegram 运行时、持久化层的架构改进。
+5. **P2**：监控、容器加固、CI、测试补强。
+
+## 暂不建议立即做的事项
+
+- 暂不切换 Quart/全异步架构：先稳定现有 Flask + 双 event loop 边界，迁移会放大故障面。
+- 暂不新增下载后端：Telethon/tdl/aria2 的职责和降级路径需要先统一（aria2 路径目前生产代码已不引用，属于任务 4 的去留决策）。
+- 删除旧文件前先确认生产容器和部署脚本已切换到唯一入口（任务 5 的前置条件），再批量归档。

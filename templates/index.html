@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TG 视频下载器 · TDL 版</title>
+  <link rel="icon"
+    href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🚀</text></svg>">
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+
+<body>
+  <div class="header">
+    <h1>TG 视频下载器 · TDL 版</h1>
+    <div class="conn-status conn-loading" id="connStatus"><span class="dot"></span> 连接中...</div>
+    <div class="search-box">
+      <input id="searchInput" placeholder="频道链接或 @用户名" onkeydown="if(event.key==='Enter')doSearch()">
+      <button onclick="doSearch()">搜索</button>
+    </div>
+  </div>
+  <div class="mobile-nav" id="mobileNav">
+    <button class="active" data-panel="dialogs" onclick="setMobilePanel('dialogs')">对话</button>
+    <button data-panel="videos" onclick="setMobilePanel('videos')">视频</button>
+    <button data-panel="downloads" onclick="setMobilePanel('downloads')">任务</button>
+  </div>
+  <button class="mobile-task-fab" id="mobileTaskFab" onclick="setMobilePanel('downloads')">
+    <span class="mobile-task-fab-label">TDL 下载任务</span>
+    <span class="mobile-task-fab-meta" id="mobileTaskFabMeta">空闲</span>
+    <span class="mobile-task-fab-badge" id="mobileTaskFabBadge">0</span>
+  </button>
+  <div class="container">
+    <!-- 左：对话列表 -->
+    <div class="panel panel-dialogs mobile-active" data-panel="dialogs">
+      <div class="panel-header">对话列表 <button class="btn btn-sm" onclick="loadDialogs({ forceRefresh: true })">刷新</button></div>
+      <div class="dialog-tabs">
+        <div class="d-tab active" onclick="switchDialogTab('全部', this)">全部</div>
+        <div class="d-tab" onclick="switchDialogTab('私聊', this)">私聊</div>
+        <div class="d-tab" onclick="switchDialogTab('群组', this)">群组</div>
+        <div class="d-tab" onclick="switchDialogTab('频道', this)">频道</div>
+      </div>
+      <div class="filter-bar">
+        <input type="text" id="dialogSearch" placeholder="搜索对话名称..." oninput="filterDialogs()" style="width: 100%;">
+      </div>
+      <div id="dialogList">
+        <div class="loading">
+          <div class="spinner"></div>等待连接...
+        </div>
+      </div>
+    </div>
+    <!-- 中：视频列表 -->
+    <div class="panel panel-videos mobile-hidden" data-panel="videos">
+      <div class="panel-header">
+        <span id="videoTitle">选择对话以扫描视频</span>
+        <div class="scan-opts">
+          <label>条数</label>
+          <input id="scanLimit" type="number" value="100" min="10" max="5000">
+          <label><input type="checkbox" id="includeReplies"> 含评论</label>
+          <label>评论帖</label>
+          <input id="replyPostLimit" type="number" value="50" min="0" max="500" title="勾选含评论时，最多扫描多少个有评论的帖子">
+          <button class="btn btn-sm btn-outline" onclick="scanVideos(true)">重新扫描</button>
+        </div>
+      </div>
+      <!-- 筛选/排序栏 -->
+      <div class="filter-bar" id="filterBar" style="display:none">
+        <input type="text" id="filterText" placeholder="本页过滤；找不到请点频道搜索" oninput="applyFilter()" onkeydown="if(event.key==='Enter')searchChannelVideos()">
+        <button class="btn btn-sm btn-outline" onclick="searchChannelVideos()">频道搜索</button>
+        <label>大小 &ge;</label>
+        <input type="number" id="filterSizeMin" placeholder="MB"
+          style="width:50px; background:#1a1a2e; border:1px solid #333; color:#ccc; border-radius:4px; padding:4px; font-size:12px;"
+          oninput="applyFilter()">
+        <label>排序</label>
+        <select id="sortBy" onchange="applyFilter()">
+          <option value="default">默认</option>
+          <option value="size_desc">大小 ↓</option>
+          <option value="size_asc">大小 ↑</option>
+          <option value="duration_desc">时长 ↓</option>
+          <option value="duration_asc">时长 ↑</option>
+          <option value="date_desc">日期 ↓</option>
+          <option value="date_asc">日期 ↑</option>
+          <option value="name_asc">文件名 A-Z</option>
+        </select>
+      </div>
+      <div class="video-toolbar" id="videoToolbar" style="display:none">
+        <input type="checkbox" id="selectAll" onchange="toggleSelectAll()">
+        <label for="selectAll">全选 (<span id="selectedCount">0</span>/<span id="totalCount">0</span>)</label>
+        <button class="btn btn-sm btn-outline" style="margin-left: 4px;" onclick="invertSelection()">反选</button>
+        <span class="selected-info" id="selectedInfo"></span>
+        <span class="toolbar-spacer"></span>
+        <button class="btn btn-sm" onclick="downloadSelected()">批量下载</button>
+      </div>
+      <div id="videoList">
+        <div class="empty">请从左侧选择对话，或搜索频道</div>
+      </div>
+    </div>
+    <!-- 右：下载/文件 -->
+    <div class="panel panel-downloads mobile-hidden" data-panel="downloads">
+      <div class="downloads-resizer" id="downloadsResizer" title="拖动调整侧边栏宽度，双击恢复默认"></div>
+      <div class="tabs" style="background:var(--panel);border-bottom:1px solid var(--border)">
+        <div class="tab active" onclick="switchTab('downloads',this)">TDL 下载任务</div>
+        <div class="tab" onclick="switchTab('files',this)">已下载文件</div>
+        <div class="tab" onclick="switchTab('history',this)">下载历史</div>
+        <div class="tab" onclick="switchTab('recovery',this)">日志恢复</div>
+      </div>
+      <div style="display:flex;align-items:center;border-bottom:1px solid var(--border);background:#111;">
+        <div class="queue-summary" id="queueSummary" style="border-bottom:none;flex:1;">并发 0/3 · 排队 0 · 总速率 0B/s</div>
+        <button onclick="retryAllIncomplete()" title="继续所有未完成任务"
+          style="background:none;border:none;border-left:1px solid #2a2a2a;color:#999;padding:0 10px;cursor:pointer;font-size:11px;height:100%;white-space:nowrap;flex-shrink:0;">继续全部</button>
+        <button onclick="clearFailedTasks()" title="清除失败/已取消的任务"
+          style="background:none;border:none;border-left:1px solid #2a2a2a;color:#555;padding:0 10px;cursor:pointer;font-size:11px;height:100%;white-space:nowrap;flex-shrink:0;">清除失败任务</button>
+      </div>
+      <div class="health-summary" id="healthSummary">健康检查加载中...</div>
+      <div class="proxy-switcher">
+        <span>代理模式</span>
+        <select id="proxyTypeSelect">
+          <option value="http">HTTP</option>
+          <option value="socks5h">SOCKS5H</option>
+        </select>
+        <button class="btn btn-sm btn-outline" id="proxyTypeSaveBtn" onclick="saveProxyType()">保存</button>
+        <span id="proxyTypeStatus" class="proxy-switcher-status">加载中...</span>
+      </div>
+      <div class="queue-summary" id="taskToolbar" style="display:flex;gap:6px;align-items:center;">
+          <label><input type="checkbox" onchange="toggleAllTasks(this.checked)"> 批量</label>
+          <button class="btn btn-sm btn-outline" onclick="bulkTaskAction('resume')">继续</button>
+          <button class="btn btn-sm btn-outline" onclick="bulkTaskAction('pause')">暂停</button>
+          <button class="btn btn-sm btn-outline" onclick="bulkTaskAction('delete')">删除</button>
+      </div>
+      <div id="tabDownloads">
+        <div class="empty">暂无下载任务</div>
+      </div>
+      <div id="tabFiles" style="display:none">
+        <div class="loading">
+          <div class="spinner"></div>加载中...
+        </div>
+      </div>
+      <div id="tabHistory" style="display:none">
+        <div class="filter-bar">
+          <input id="historySearch" placeholder="文件名、频道、下载器..." oninput="loadHistory(1)">
+          <select id="historyStatus" onchange="loadHistory(1)">
+            <option value="">全部状态</option><option value="downloading">下载中</option><option value="queued">排队中</option><option value="paused">已暂停</option><option value="done">已完成</option><option value="skipped">已跳过</option><option value="error">失败</option><option value="cancelled">已取消</option>
+          </select>
+        </div>
+        <div id="historyList"><div class="loading"><div class="spinner"></div>加载中...</div></div>
+      </div>
+      <div id="tabRecovery" style="display:none">
+        <div class="queue-summary" style="display:flex;gap:8px;align-items:center;">
+          <label><input id="recoverAll" type="checkbox" onchange="toggleRecovery(this.checked)"> 全选</label>
+          <button class="btn btn-sm" onclick="recoverSelected()">将选中任务加入队列</button>
+          <button class="btn btn-sm btn-outline" onclick="loadRecovery()">刷新</button>
+        </div>
+        <div id="recoveryList"><div class="empty">加载日志候选中...</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 视频预览弹窗 -->
+  <div class="modal-overlay hidden" id="previewModal" onclick="closePreview(event)">
+    <div class="modal-content">
+      <button class="modal-close" onclick="closePreview()">&times;</button>
+      <video id="previewVideo" controls autoplay></video>
+      <div class="modal-title" id="previewTitle"></div>
+    </div>
+  </div>
+
+  <!-- 右键菜单 -->
+  <div id="contextMenu" class="context-menu"
+    style="display:none; position:fixed; z-index:9999; background:#1e1e2e; border:1px solid #444; border-radius:6px; box-shadow:0 4px 12px rgba(0,0,0,0.5); overflow:hidden;">
+    <div class="menu-item" onclick="cmdRenameFile()">重命名</div>
+    <div class="menu-item menu-danger" onclick="cmdDeleteFile()">删除本地文件并清理记录</div>
+  </div>
+
+  <div class="selection-float" id="selectionFloat">
+    <span class="selection-float-info" id="selectionFloatInfo">已选 0 个</span>
+    <button class="btn btn-sm" onclick="downloadSelected()">下载选中</button>
+    <button class="btn btn-sm btn-outline" onclick="clearVideoSelection()">取消选择</button>
+  </div>
+
+  <script defer src="/static/js/app.js"></script>
+</body>
+
+</html>

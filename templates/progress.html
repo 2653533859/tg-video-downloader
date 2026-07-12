@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>实时进度 - Telegram 下载器</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #f5f5f5;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+
+        .status-bar {
+            background: white;
+            padding: 15px 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .ws-status {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #ddd;
+        }
+
+        .status-dot.connected {
+            background: #4caf50;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .tasks-container {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .task-item {
+            padding: 15px;
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            margin-bottom: 15px;
+            transition: all 0.3s;
+        }
+
+        .task-item:hover {
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .task-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .task-name {
+            font-weight: 600;
+            color: #333;
+        }
+
+        .task-status {
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .task-status.downloading {
+            background: #e3f2fd;
+            color: #1976d2;
+        }
+
+        .task-status.done {
+            background: #e8f5e9;
+            color: #388e3c;
+        }
+
+        .task-status.error {
+            background: #ffebee;
+            color: #d32f2f;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #e0e0e0;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-bottom: 10px;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #4caf50, #8bc34a);
+            transition: width 0.3s;
+        }
+
+        .task-info {
+            display: flex;
+            justify-content: space-between;
+            font-size: 14px;
+            color: #666;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #999;
+        }
+
+        .test-button {
+            background: #2196f3;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .test-button:hover {
+            background: #1976d2;
+        }
+
+        .test-button:active {
+            transform: scale(0.98);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📊 实时下载进度</h1>
+
+        <div class="status-bar">
+            <div class="ws-status">
+                <div class="status-dot" id="statusDot"></div>
+                <span id="statusText">连接中...</span>
+            </div>
+            <button class="test-button" onclick="testDownload()">测试下载</button>
+        </div>
+
+        <div class="tasks-container">
+            <div id="tasksList"></div>
+        </div>
+    </div>
+
+    <script src="/static/websocket.js"></script>
+    <script>
+        // 获取 WebSocket URL
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${protocol}//${window.location.host}/ws/progress`;
+
+        // 创建 WebSocket 实例
+        const ws = new ProgressWebSocket(wsUrl);
+
+        // 任务状态
+        const tasks = new Map();
+
+        // 连接事件
+        ws.on('connected', () => {
+            updateStatus('已连接', true);
+        });
+
+        ws.on('disconnected', () => {
+            updateStatus('已断开', false);
+        });
+
+        ws.on('error', (error) => {
+            updateStatus('连接错误', false);
+        });
+
+        // 数据事件
+        ws.on('init', (data) => {
+            console.log('初始化数据:', data);
+            tasks.clear();
+
+            // 加载现有任务
+            for (const [taskId, taskData] of Object.entries(data)) {
+                tasks.set(taskId, taskData);
+            }
+
+            renderTasks();
+        });
+
+        ws.on('progress', (data) => {
+            console.log('进度更新:', data);
+
+            // 更新任务状态
+            for (const [taskId, taskData] of Object.entries(data)) {
+                tasks.set(taskId, taskData);
+            }
+
+            renderTasks();
+        });
+
+        ws.on('task_added', ({ task_id, data }) => {
+            console.log('新任务:', task_id);
+            tasks.set(task_id, data);
+            renderTasks();
+        });
+
+        ws.on('task_completed', ({ task_id, data }) => {
+            console.log('任务完成:', task_id);
+            tasks.set(task_id, data);
+            renderTasks();
+        });
+
+        ws.on('task_error', ({ task_id, data }) => {
+            console.log('任务错误:', task_id);
+            tasks.set(task_id, data);
+            renderTasks();
+        });
+
+        // 更新连接状态
+        function updateStatus(text, connected) {
+            const statusDot = document.getElementById('statusDot');
+            const statusText = document.getElementById('statusText');
+
+            statusText.textContent = text;
+
+            if (connected) {
+                statusDot.classList.add('connected');
+            } else {
+                statusDot.classList.remove('connected');
+            }
+        }
+
+        // 渲染任务列表
+        function renderTasks() {
+            const container = document.getElementById('tasksList');
+
+            if (tasks.size === 0) {
+                container.innerHTML = '<div class="empty-state">暂无下载任务</div>';
+                return;
+            }
+
+            container.innerHTML = Array.from(tasks.entries())
+                .map(([taskId, task]) => `
+                    <div class="task-item">
+                        <div class="task-header">
+                            <div class="task-name">${escapeHtml(task.filename || taskId)}</div>
+                            <div class="task-status ${task.status}">${getStatusText(task.status)}</div>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" style="width: ${task.progress || 0}%"></div>
+                        </div>
+                        <div class="task-info">
+                            <span>${task.downloaded || '0B'} / ${task.total || '未知'}</span>
+                            <span>${task.speed || '0B/s'}</span>
+                        </div>
+                    </div>
+                `)
+                .join('');
+        }
+
+        // 状态文本
+        function getStatusText(status) {
+            const texts = {
+                'downloading': '下载中',
+                'done': '已完成',
+                'error': '错误',
+                'queued': '排队中',
+                'paused': '已暂停'
+            };
+            return texts[status] || status;
+        }
+
+        // HTML 转义
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // 测试下载
+        async function testDownload() {
+            try {
+                const response = await fetch('/api/download', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        filename: `test_${Date.now()}.mp4`,
+                        message_ids: [123],
+                        entity_id: 456
+                    })
+                });
+
+                const result = await response.json();
+                console.log('测试下载结果:', result);
+            } catch (e) {
+                console.error('测试下载失败:', e);
+            }
+        }
+
+        // 启动连接
+        ws.connect();
+
+        // 页面卸载时断开
+        window.addEventListener('beforeunload', () => {
+            ws.disconnect();
+        });
+    </script>
+</body>
+</html>
