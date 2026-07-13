@@ -1046,6 +1046,16 @@ class TestDownloadWatchdog:
         assert watchdog.last_progress["t1"]["bytes"] == 10
         assert "t2" not in watchdog.last_progress
 
+    def test_stop_is_responsive(self):
+        from src.download.watchdog import DownloadWatchdog
+
+        # check_interval 很大；Event.wait 让 stop 立即唤醒线程退出（原 time.sleep 做不到）
+        watchdog = DownloadWatchdog(check_interval=100, get_tasks_callback=lambda: {})
+        watchdog.start()
+        watchdog.stop()
+        assert watchdog._thread is not None
+        assert not watchdog._thread.is_alive()
+
     def test_updates_when_bytes_advance(self):
         from src.download.watchdog import DownloadWatchdog
 
@@ -1263,6 +1273,73 @@ class TestHealthChecker:
 
         assert calls == ["reconnect"]
         assert checker.get_stats()["failure_count"] == 0
+
+    def test_health_checker_stop_is_responsive(self):
+        from src.telegram.health_checker import TelegramHealthChecker
+
+        # check_interval 很大；若仍用 time.sleep 则 stop 后线程仍存活，改用
+        # 可中断的 Event.wait 后 stop 立即唤醒线程退出。
+        hc = TelegramHealthChecker(client=Mock(), loop=Mock(), check_interval=100)
+        hc.start()
+        hc.stop()
+        assert hc._thread is not None
+        assert not hc._thread.is_alive()
+
+
+class TestGracefulShutdown:
+    def test_shutdown_order_and_idempotent(self):
+        import threading as _th
+        from src.system import GracefulShutdown
+
+        events = []
+        stop_event = _th.Event()
+
+        class Stoppable:
+            def __init__(self, name):
+                self.name = name
+
+            def stop(self):
+                events.append(f"stop:{self.name}")
+
+        class FakeThread:
+            def join(self, timeout=None):
+                events.append("join")
+
+        gs = GracefulShutdown(
+            stop_event=stop_event,
+            stoppables=[Stoppable("wd"), Stoppable("hc")],
+            disconnect_clients=lambda: events.append("disconnect"),
+            close_persistence=lambda: events.append("close"),
+            join_threads=[FakeThread(), lambda: None],
+        )
+        gs.shutdown()
+        assert stop_event.is_set()
+        assert events == ["stop:wd", "stop:hc", "disconnect", "join", "close"]
+        # 幂等：重复信号只执行一次
+        gs.shutdown()
+        assert events == ["stop:wd", "stop:hc", "disconnect", "join", "close"]
+
+    def test_shutdown_is_defensive(self):
+        import threading as _th
+        from src.system import GracefulShutdown
+
+        calls = []
+
+        class Boom:
+            def stop(self):
+                raise RuntimeError("boom")
+
+        def _raise():
+            raise RuntimeError("disconnect failed")
+
+        gs = GracefulShutdown(
+            stop_event=_th.Event(),
+            stoppables=[Boom()],
+            disconnect_clients=_raise,
+            close_persistence=lambda: calls.append("close"),
+        )
+        gs.shutdown()  # 单步异常不得阻塞后续，也不抛出
+        assert calls == ["close"]
 
 
 class TestTelegramStartup:

@@ -65,7 +65,7 @@
 - [ ] **（P1-6c）** 用固定 worker pool 替代每任务 `threading.Thread(daemon=True)`（app.py:647）；当前 `MAX_CONCURRENT_DOWNLOADS = 1`（app.py:488）靠 DownloadScheduler 计数槽位控制。
 - [x] **P1-6a ✅（2026-07-13）** 简化 DownloadScheduler 计数补偿逻辑：重写 `src/download/scheduler.py`，用单调递增 generation 令牌跟踪槽位归属（`get_next_task` 发当代令牌并占槽，`release_tasks` 持匹配令牌才还槽，`release_scheduled_task` 直接作废当代令牌）——消除"正常释放 vs 停滞释放"的计数对冲，杜绝槽位泄漏/超发；原 `released_stalled_task_ids` 计数已移除。
 - [x] **P1-6a ✅（2026-07-13）** 明确任务状态机迁移表：新建 `src/download/transitions.py`（`can_transition`/`is_terminal` + 显式邻接表），四终态 `done/skipped/error/cancelled` 默认不可迁出；`set_task_state`/`update_task_state` 接入校验（自动流程 `allow_revive=False` 禁覆盖终态，仅 resume/retry `allow_revive=True` 可复活）；`_restart_stalled_download`/`_recover_stalled_tasks` 改走状态机，watchdog 不再重启已完成任务。
-- [ ] **（P1-6b）** 增加优雅退出：当前所有后台线程（双 Telegram 线程、队列处理器、watchdog、健康检查、缩略图清理、DB 备份）全是 daemon 线程，进程退出直接杀死，无清理路径——下载中的文件和状态可能不一致。
+- [x] **P1-6b ✅（2026-07-13 完成）** 增加优雅退出：新建 `src/system/shutdown.py` 的 `GracefulShutdown` 编排器（set stop_event → 各 `stop()` → 断开 TG 客户端 → join → 关闭持久化，防御式 + 幂等）。watchdog/health_checker 的 `stop()` 由 `time.sleep` 改为 `Event.wait` **可中断等待**（立即生效）；缩略图清理/DB 备份两个周期循环接入 `shutdown_event`；app.py 新增 `shutdown_runtime`/`_disconnect_tg_clients`/`_install_shutdown_signal_handlers`，两入口 `__main__` 注册 SIGTERM/SIGINT。`TaskStatePersistence.close()` 在停机时释放连接（WAL 收尾），避免下载中状态不一致。新增 4 条测试（watchdog/health 可中断停止 + 编排顺序/幂等 + 防御式）。
 - [ ] **（P1-6c）** tdl 单实例 Bolt DB 约束做成调度器级资源锁，而非依赖 max_concurrent=1 的隐含行为。
 - P1-6a 验收结果：新增 `tests/test_transitions.py`（6 项）+ scheduler 令牌测试（4 项）；全量 **97 passed**（原 87 零回归）；`py_compile` 通过；隔离冒烟装配成功（32 路由）、终态保护生效（watchdog 覆盖 `done→error` 被拒、resume 复活 `done→queued` 放行）。
 - 验收（P1-6 整体）：并发提交、取消、重试、watchdog 恢复、进程重启恢复五类场景有集成测试。

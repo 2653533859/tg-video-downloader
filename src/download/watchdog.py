@@ -44,6 +44,7 @@ class DownloadWatchdog:
 
         self._running = False
         self._thread: Optional[threading.Thread] = None
+        self._stop_event = threading.Event()
         self._last_check_progress: Dict[str, Dict[str, Any]] = {}
         self.last_progress = self._last_check_progress
 
@@ -54,6 +55,7 @@ class DownloadWatchdog:
             return
 
         self._running = True
+        self._stop_event.clear()
         self._thread = threading.Thread(target=self._monitor_loop, daemon=True)
         self._thread.start()
         self._log_info(
@@ -62,8 +64,9 @@ class DownloadWatchdog:
         )
 
     def stop(self):
-        """停止看门狗"""
+        """停止看门狗（可中断等待，立即生效）"""
         self._running = False
+        self._stop_event.set()
         if self._thread:
             self._thread.join(timeout=5)
         self._log_info("[watchdog] 下载监控已停止")
@@ -71,8 +74,10 @@ class DownloadWatchdog:
     def _monitor_loop(self):
         """监控循环"""
         while self._running:
+            # 可中断等待：stop() 触发后立即退出，不必等满一个 check_interval
+            if self._stop_event.wait(self.check_interval):
+                break
             try:
-                time.sleep(self.check_interval)
                 self._check_all_tasks()
             except Exception as e:
                 self._log_error(f"[watchdog] 监控异常: {e}")

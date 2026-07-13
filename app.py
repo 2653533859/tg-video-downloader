@@ -4,6 +4,7 @@
 import os
 import sys
 import asyncio
+import signal
 import threading
 import time
 import json
@@ -112,7 +113,12 @@ from src.security import (
     require_web_auth,
 )
 from src.state.persistence import TaskStatePersistence
-from src.system import SystemStatusService, start_runtime_services, validate_runtime_config
+from src.system import (
+    GracefulShutdown,
+    SystemStatusService,
+    start_runtime_services,
+    validate_runtime_config,
+)
 from src.telegram import (
     TelegramDebugService,
     TelegramHealthChecker,
@@ -132,6 +138,9 @@ relay_loop = asyncio.new_event_loop()
 relay_tg_client = TelegramClient(StringSession(), API_ID, API_HASH, loop=relay_loop, proxy=build_telethon_proxy_config(PROXY_CONFIG))
 tg_runtime = TelegramRuntime(tg_client, tg_loop)
 relay_runtime = TelegramRuntime(relay_tg_client, relay_loop)
+
+# 优雅退出：周期后台循环轮询该事件，收到即退出（配合 shutdown_runtime 编排）
+shutdown_event = threading.Event()
 
 # 连接状态
 tg_connected = False
@@ -338,9 +347,11 @@ def backup_task_database():
 
 
 def run_task_database_backup_loop():
-    while True:
+    while not shutdown_event.is_set():
         backup_task_database()
-        time.sleep(24 * 3600)
+        # 可中断等待：收到停机事件立即退出
+        if shutdown_event.wait(24 * 3600):
+            break
 
 
 def _query_task_history(status="", query="", page=1, per_page=30):
@@ -803,8 +814,10 @@ def cleanup_thumbnail_cache():
 
 def run_thumbnail_cleanup_loop():
     cleanup_thumbnail_cache()
-    while True:
-        time.sleep(6 * 3600)
+    while not shutdown_event.is_set():
+        # 可中断等待：收到停机事件立即退出
+        if shutdown_event.wait(6 * 3600):
+            break
         cleanup_thumbnail_cache()
 
 
@@ -1946,12 +1959,64 @@ def start_background_clients():
     return {"tg_thread": tg_thread}
 
 
+def _disconnect_tg_clients():
+    """停机时断开两个 Telegram 客户端并停止其事件循环（有界、防御式）。"""
+    for client, loop in ((tg_client, tg_loop), (relay_tg_client, relay_loop)):
+        try:
+            if client is not None and loop.is_running():
+                asyncio.run_coroutine_threadsafe(client.disconnect(), loop).result(timeout=5)
+        except Exception:
+            pass
+        try:
+            if loop.is_running():
+                loop.call_soon_threadsafe(loop.stop)
+        except Exception:
+            pass
+
+
+_shutdown_lock = threading.Lock()
+_shutdown_done = False
+
+
+def shutdown_runtime(*_args):
+    """有序停止所有后台线程与资源；幂等（重复信号只执行一次）。"""
+    global _shutdown_done
+    with _shutdown_lock:
+        if _shutdown_done:
+            return
+        _shutdown_done = True
+
+    stoppables = [obj for obj in (download_watchdog, tg_health_checker) if obj is not None]
+    coordinator = GracefulShutdown(
+        stop_event=shutdown_event,
+        stoppables=stoppables,
+        disconnect_clients=_disconnect_tg_clients,
+        close_persistence=task_persistence.close,
+        log_info=log_info,
+    )
+    coordinator.shutdown()
+
+
+def _install_shutdown_signal_handlers():
+    """主线程注册 SIGTERM/SIGINT：先优雅清理再退出。"""
+    def _handler(_signum, _frame):
+        shutdown_runtime()
+        raise SystemExit(0)
+
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            signal.signal(sig, _handler)
+        except (ValueError, OSError):
+            pass
+
+
 if __name__ == "__main__":
     sys.modules.setdefault("app", sys.modules[__name__])
     import app_new
 
     app_new.validate_config()
     app_new.start_runtime()
+    _install_shutdown_signal_handlers()
     time.sleep(3)
     print(f"Web UI 启动: http://{WEB_BIND_HOST}:{WEB_BIND_PORT}")
     app_new.app.run(host=WEB_BIND_HOST, port=WEB_BIND_PORT, threaded=True)

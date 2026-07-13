@@ -224,6 +224,7 @@ register_all_blueprints()
 if __name__ == "__main__":
     validate_config()
     start_runtime()
+    runtime._install_shutdown_signal_handlers()
     time.sleep(3)
     print(f"Web UI 启动: http://{WEB_BIND_HOST}:{WEB_BIND_PORT}")
     app.run(host=WEB_BIND_HOST, port=WEB_BIND_PORT, threaded=True)

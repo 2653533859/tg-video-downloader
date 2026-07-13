@@ -2,7 +2,6 @@
 Telegram 健康检查器
 定期检查 Telegram 连接状态并自动重连
 """
-import time
 import threading
 import logging
 import asyncio
@@ -49,6 +48,7 @@ class TelegramHealthChecker:
 
         self._running = False
         self._thread: Optional[threading.Thread] = None
+        self._stop_event = threading.Event()
         self._failure_count = 0
         self._last_check_ok = True
 
@@ -59,13 +59,15 @@ class TelegramHealthChecker:
             return
 
         self._running = True
+        self._stop_event.clear()
         self._thread = threading.Thread(target=self._check_loop, daemon=True)
         self._thread.start()
         self._log_info(f"[tg-health] Telegram 连接健康检查已启动 (间隔:{self.check_interval}s)")
 
     def stop(self):
-        """停止健康检查"""
+        """停止健康检查（可中断等待，立即生效）"""
         self._running = False
+        self._stop_event.set()
         if self._thread:
             self._thread.join(timeout=5)
         self._log_info("[tg-health] Telegram 连接健康检查已停止")
@@ -73,8 +75,10 @@ class TelegramHealthChecker:
     def _check_loop(self):
         """检查循环"""
         while self._running:
+            # 可中断等待：stop() 触发后立即退出，不必等满一个 check_interval
+            if self._stop_event.wait(self.check_interval):
+                break
             try:
-                time.sleep(self.check_interval)
                 self._perform_check()
             except Exception as e:
                 self._log_error(f"[tg-health] 健康检查异常: {e}")
