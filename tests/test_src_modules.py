@@ -599,6 +599,103 @@ class TestTdlDownloadExecutor:
         assert updates["t1"]["status"] == "error"
         assert updates["t1"]["error"] == "bad url"
 
+    def test_download_acquires_resource_lock(self):
+        from src.download.tdl_executor import TdlDownloadExecutor
+
+        events = []
+
+        class TrackLock:
+            def __enter__(self):
+                events.append("enter")
+                return self
+
+            def __exit__(self, *_args):
+                events.append("exit")
+                return False
+
+        executor = TdlDownloadExecutor(
+            build_message_url=lambda *_args: "https://t.me/c/1/1",
+            build_command=lambda *_args: ["true"],
+            clear_tdl_error=lambda _task_id: None,
+            register_process=lambda *_args: None,
+            drop_process=lambda _task_id: None,
+            get_process=lambda _task_id: None,
+            set_tdl_error=lambda *_args: None,
+            last_tdl_error=lambda _task_id: "",
+            stop_process=lambda _process: None,
+            detect_resume_offset=lambda *_args: 0,
+            resolve_progress_path=lambda path: path,
+            prepare_telegram_fallback_target=lambda path: path,
+            save_resume_info=lambda *_args: None,
+            clear_resume_info=lambda _task_id: None,
+            update_task_state=lambda *_args, **_kwargs: None,
+            set_task_state=lambda *_args: None,
+            copy_task_state=lambda _task_id: {},
+            is_cancelled=lambda _task_id: False,
+            should_capture_error_line=lambda _line: False,
+            choose_more_specific_error=lambda current, _candidate: current,
+            reconcile_progress_size=lambda current_size, _written, allow: (current_size, allow),
+            did_restart_from_scratch=lambda **_kwargs: False,
+            should_retry_error=lambda *_args, **_kwargs: False,
+            should_fallback=lambda _err: False,
+            remember_fallback_channel=lambda *_args: None,
+            validate_completion=lambda **_kwargs: None,
+            download_with_telegram=lambda *_args: None,
+            format_size=lambda size: f"{int(size)}B",
+            log_info=lambda _msg: None,
+            log_warning=lambda _msg: None,
+            log_error=lambda _msg: None,
+            restart_reset_min_bytes=64,
+            resource_lock=TrackLock(),
+        )
+        # 跳过真实子进程，仅验证 _run_once 被资源锁包裹
+        executor._run_once = lambda *_args, **_kwargs: (0, 0)
+        executor.download("t1", 123, 4, "chat", {"filename": "v.mp4", "size": 1}, "/tmp/v.mp4", "/tmp")
+        assert events == ["enter", "exit"]
+
+
+class TestDownloadWorkerPool:
+    def test_submit_runs_worker_lazy_start(self):
+        import threading as _th
+        from src.download.worker_pool import DownloadWorkerPool
+
+        done = _th.Event()
+        received = {}
+
+        def worker(items, name):
+            received["items"] = items
+            received["name"] = name
+            done.set()
+
+        pool = DownloadWorkerPool(1, worker)
+        assert pool._started is False  # 懒启动：未提交前不建线程
+        pool.submit(["t1"], "chat")
+        assert done.wait(2) is True
+        assert received == {"items": ["t1"], "name": "chat"}
+        assert pool._started is True
+        pool.stop()
+
+    def test_worker_exception_does_not_kill_thread(self):
+        import threading as _th
+        from src.download.worker_pool import DownloadWorkerPool
+
+        first = _th.Event()
+        second = _th.Event()
+
+        def worker(items, _name):
+            if items == "boom":
+                first.set()
+                raise RuntimeError("x")
+            second.set()
+
+        pool = DownloadWorkerPool(1, worker)
+        pool.submit("boom", "c")
+        assert first.wait(2)
+        pool.submit("ok", "c")
+        # worker 抛异常后线程不退出，仍能处理后续任务
+        assert second.wait(2)
+        pool.stop()
+
 
 class TestTdlRules:
     def test_error_classification_and_retry(self):

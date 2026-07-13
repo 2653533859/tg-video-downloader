@@ -1,5 +1,6 @@
 """tdl subprocess download executor."""
 
+import contextlib
 import os
 import subprocess
 import threading
@@ -43,6 +44,7 @@ class TdlDownloadExecutor:
         log_error,
         restart_reset_min_bytes,
         stall_timeout=600,
+        resource_lock=None,
     ):
         self.build_message_url = build_message_url
         self.build_command = build_command
@@ -77,6 +79,9 @@ class TdlDownloadExecutor:
         self.log_error = log_error
         self.restart_reset_min_bytes = restart_reset_min_bytes
         self.stall_timeout = stall_timeout
+        # tdl 单实例 Bolt DB 约束：显式资源锁，串行化 tdl 子进程调用。
+        # None 时用 nullcontext（不加锁），保持既有行为与可测性。
+        self.resource_lock = resource_lock
 
     def download(self, task_id, entity_id, msg_id, dialog_name, info, filepath, save_dir):
         message_url = self._build_message_url_or_error(task_id, entity_id, msg_id)
@@ -117,20 +122,22 @@ class TdlDownloadExecutor:
         try:
             while True:
                 try:
-                    start_offset, last_retry_size = self._run_once(
-                        task_id,
-                        entity_id,
-                        msg_id,
-                        dialog_name,
-                        info,
-                        filepath,
-                        save_dir,
-                        message_url,
-                        total_bytes,
-                        start_offset,
-                        retry_count,
-                        last_retry_size,
-                    )
+                    # tdl 子进程访问单实例 Bolt DB，用资源锁串行化
+                    with (self.resource_lock or contextlib.nullcontext()):
+                        start_offset, last_retry_size = self._run_once(
+                            task_id,
+                            entity_id,
+                            msg_id,
+                            dialog_name,
+                            info,
+                            filepath,
+                            save_dir,
+                            message_url,
+                            total_bytes,
+                            start_offset,
+                            retry_count,
+                            last_retry_size,
+                        )
                     break
                 except Exception as exc:
                     err = str(exc)

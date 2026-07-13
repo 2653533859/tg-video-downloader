@@ -86,6 +86,7 @@ from src.download.paths import (
 from src.download.manager import DownloadManager
 from src.download.resume import ResumeStore
 from src.download.scheduler import DownloadScheduler
+from src.download.worker_pool import DownloadWorkerPool
 from src.download.status import build_download_status_payload
 from src.download.transitions import TERMINAL_STATES, can_transition
 from src.download.task_actions import (
@@ -506,6 +507,9 @@ def _calc_download_timeout(file_size_bytes):
 # "Current database is used by another process".
 MAX_CONCURRENT_DOWNLOADS = 1
 download_scheduler = DownloadScheduler(max_concurrent=MAX_CONCURRENT_DOWNLOADS)
+# tdl 单实例 Bolt DB 资源锁：把 max_concurrent=1 的隐含串行约束显式化，
+# 即使将来放宽并发，tdl 子进程仍被串行化，避免 Bolt DB 争用。
+tdl_resource_lock = threading.Lock()
 TASK_STALL_TIMEOUT = 600
 TELEGRAM_CHUNK_TIMEOUT = 60
 TELEGRAM_MAX_RETRY_ATTEMPTS = 12
@@ -663,7 +667,7 @@ def process_queue():
     while True:
         task = get_next_from_queue()
         if not task: break
-        threading.Thread(target=_do_download, args=([task], task.get("dialog_name", "unknown")), daemon=True).start()
+        download_worker_pool.submit([task], task.get("dialog_name", "unknown"))
         time.sleep(1)
 
 
@@ -1877,6 +1881,7 @@ def get_tdl_download_executor():
             log_warning=log_warning,
             log_error=log_error,
             restart_reset_min_bytes=TDL_RESTART_RESET_MIN_BYTES,
+            resource_lock=tdl_resource_lock,
         )
     return tdl_download_executor
 
@@ -1911,6 +1916,10 @@ def get_download_worker():
 
 def _do_download(task_items, dialog_name):
     return get_download_worker().run(task_items, dialog_name)
+
+
+# 固定 daemon worker 池：复用线程执行下载调度，替代每任务新建线程。
+download_worker_pool = DownloadWorkerPool(MAX_CONCURRENT_DOWNLOADS, _do_download)
 
 
 # Relay 并发控制
@@ -1992,7 +2001,7 @@ def shutdown_runtime(*_args):
             return
         _shutdown_done = True
 
-    stoppables = [obj for obj in (download_watchdog, tg_health_checker) if obj is not None]
+    stoppables = [obj for obj in (download_watchdog, tg_health_checker, download_worker_pool) if obj is not None]
     coordinator = GracefulShutdown(
         stop_event=shutdown_event,
         stoppables=stoppables,
