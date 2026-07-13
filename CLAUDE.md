@@ -47,7 +47,7 @@ src/
 - Flask `threaded=True` + 两个独立 asyncio 事件循环线程：主 Telegram 客户端（tg_loop）与 relay 客户端（relay_loop，StringSession 避免 session 文件锁冲突）
 - **禁止**在 Flask 请求处理器中 `loop.run_until_complete()`；必须用 `run_async()` / `relay_run_async()`（app.py:872/879，底层是 `TelegramRuntime.run_async`，asyncio.run_coroutine_threadsafe + 超时）
 - 下载并发：`MAX_CONCURRENT_DOWNLOADS = 1`（app.py:473，受 tdl 单实例 Bolt DB 约束）；relay 并发：`MAX_CONCURRENT_RELAYS = 2`
-- 后台线程（全部 daemon，暂无优雅退出——见 docs/Task.md P1-6）：队列 worker、DownloadWatchdog、TelegramHealthChecker（app.py:213 在主客户端连接后初始化）、缩略图清理、任务库备份
+- 后台线程（全部 daemon）：队列 worker、DownloadWatchdog、TelegramHealthChecker（app.py:213 在主客户端连接后初始化）、缩略图清理、任务库备份。**优雅退出已接线（P1-6b）**：`GracefulShutdown`（src/system/shutdown.py）经 SIGTERM/SIGINT 有序停止——set stop_event → 各 `stop()` → 断开 TG 客户端 → join → 关闭持久化连接；watchdog/health 用 `Event.wait` 可中断等待。仍待做：worker pool 化（P1-6c）
 
 ## 任务状态机
 
