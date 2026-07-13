@@ -99,12 +99,13 @@
 - 验收：新增 3 条测试（liveness/readiness、脱敏正则、Filter 改写记录），pytest 111 passed。
 - 相关文件：`src/system/status.py`、`src/routes/system.py`、`src/utils/log_filters.py`、`app.py`。
 
-### 10. 完善容器和 CI
+### 10. 完善容器和 CI ✅（2026-07-13 完成，非 root 需宿主配套 chown）
 
-- [ ] Dockerfile 使用非 root 用户；固定基础镜像 digest；明确 session、tdl 数据、下载目录的权限边界。
-- [ ] 明确 Python 支持矩阵：本机 3.14 与容器 3.10 差异已在测试中暴露兼容问题，至少在 CI 中验证 3.10。
-- [ ] 增加 CI：lint、单元测试、Docker 构建、`docker compose config` 校验、镜像敏感文件扫描（防止 .env/session 再次进入镜像）。
-- 相关文件：`Dockerfile`、`docker-compose.yml`、`.github/workflows/*`。
+- [x] Dockerfile 使用**非 root 用户**（uid 10001 appuser，chown /app）；显式建 downloads/logs/.task_state/.resume 可写目录；digest 固定给出解析命令注释（离线无法解析真实 sha256，保留为 FROM tag + 文档）。⚠️ 现网 compose 用 `.:/app`、`/root/downloads`、`/root/.tdl` 等 **root 属主 bind-mount**，非 root 无法写入——compose 内已加明确说明：二选一「宿主 `chown -R 10001:10001 <目录>`」或「取消 `user: "0:0"` 注释临时以 root 运行」。
+- [x] docker-compose 安全加固（不影响挂载读写权限）：`security_opt: [no-new-privileges:true]` + `cap_drop: [ALL]`。
+- [x] Python 支持矩阵：CI 固定 `python 3.10`（与容器基础镜像一致）。
+- [x] CI 增加 `test` job（compileall 语法检查 + pytest + `docker compose config` 校验 + 敏感文件扫描 `git ls-files` 防 .env/session 提交），镜像 `build` job `needs: test` 且仅 push 触发。
+- 相关文件：`Dockerfile`、`docker-compose.yml`、`.github/workflows/docker-publish.yml`。
 
 ### 11. 建立分层测试体系
 

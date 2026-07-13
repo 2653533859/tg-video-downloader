@@ -33,6 +33,17 @@ services:
       - HTTPS_PROXY=${HTTPS_PROXY:-http://127.0.0.1:7890}
       - ALL_PROXY=${ALL_PROXY:-http://127.0.0.1:7890}
     restart: unless-stopped
+    # 安全加固（不影响 bind-mount 读写权限）：禁止提权 + 丢弃全部 Linux capabilities。
+    # 端口 5003 > 1024，无需 NET_BIND_SERVICE。
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # 说明：镜像默认以非 root（uid 10001）运行。本 compose 用 .:/app、
+    # /root/downloads、/root/.tdl 等 root 属主目录 bind-mount，非 root 无法写入。
+    # 二选一：① 宿主执行 chown -R 10001:10001 <上述目录>（推荐，保留最小权限）；
+    # ② 若必须以 root 运行，取消下一行注释临时覆盖（放弃非 root 加固）。
+    # user: "0:0"
     healthcheck:
       test: ["CMD", "sh", "/app/healthcheck.sh"]
       interval: 60s
