@@ -80,13 +80,13 @@
 - 验收：网络断开、代理不可用、API 超时、重连期间请求四类场景下不阻塞 Flask 线程、不泄漏线程、不串消息。
 - 相关文件：`src/telegram/runtime.py`、`src/telegram/health_checker.py`。
 
-### 8. 优化任务持久化层
+### 8. 优化任务持久化层 ✅（2026-07-13 完成）
 
-- [ ] `TaskStatePersistence.connect()` 每次操作新建 SQLite 连接并重复执行 3 个 `CREATE TABLE IF NOT EXISTS` + WAL PRAGMA（src/state/persistence.py:41-66）——改为连接复用/初始化一次 schema。
-- [ ] 移除 `enabled()` 中 `"unittest" not in sys.modules` 的测试感知逻辑（persistence.py:39-40）——生产代码不应感知测试环境，用依赖注入或配置开关代替。
-- [ ] 为状态写入增加节流，避免每次进度更新都提交事务；为 `task_history` 增加分页索引。
-- [ ] 增加 schema 版本号，规范备份一致性校验。
-- 验收：高频进度更新无明显锁等待；大历史量下分页延迟可控；备份可恢复。
+- [x] `TaskStatePersistence.connect()` 原每次操作新建 SQLite 连接并重复执行 3 个 `CREATE TABLE` + PRAGMA（旧连接还因 sqlite3 上下文管理器只提交不关闭而堆积）——改为**复用单连接**（`check_same_thread=False` + `self.lock` 串行化），schema 经 `_init_schema` **一次性初始化**；新增 `close()` 供优雅退出释放。
+- [x] 移除 `enabled()` 中 `"unittest" not in sys.modules` 的测试感知逻辑——改为构造器 `enabled=True` **配置开关**（依赖注入），`import sys` 一并删除；测试去掉 `monkeypatch.delitem(sys.modules,'unittest')` hack。
+- [x] 状态写入**节流**：同一 task 同状态的高频进度更新在 `persist_throttle_seconds`（默认 2s）窗口内跳过落库；终态与状态切换始终写。`task_history` 增加 `idx_task_history_completed(completed_at DESC, updated_at DESC)` 分页索引。
+- [x] 增加 schema 版本号（`PRAGMA user_version = SCHEMA_VERSION`，仅新库写入）；备份增加 `PRAGMA integrity_check` **一致性校验**（失败即丢弃该备份），并修复原 target 连接泄漏。
+- 验收结果：新增 3 条测试（enabled 开关 / 节流跳过同状态 / schema 版本 + 备份校验），pytest **104 passed** 零回归。
 - 相关文件：`src/state/persistence.py`、`src/state/manager.py`。
 
 ## P2：可观测性、部署与测试

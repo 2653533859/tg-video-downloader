@@ -4,11 +4,13 @@ import json
 import os
 import re
 import sqlite3
-import sys
 import threading
 import time
 from datetime import datetime
 from typing import Callable, Dict, Iterable, Optional, Tuple
+
+
+SCHEMA_VERSION = 1
 
 
 class TaskStatePersistence:
@@ -20,6 +22,8 @@ class TaskStatePersistence:
         terminal_states: Iterable[str],
         warning_logger: Optional[Callable[[str], None]] = None,
         backup_retention_days: int = 7,
+        enabled: bool = True,
+        persist_throttle_seconds: float = 2.0,
     ):
         self.state_dir = state_dir
         self.db_path = os.path.join(state_dir, "tasks.sqlite3")
@@ -28,6 +32,11 @@ class TaskStatePersistence:
         self.terminal_states = set(terminal_states)
         self.warning_logger = warning_logger or (lambda message: None)
         self.lock = threading.RLock()
+        self._enabled = enabled
+        self.persist_throttle_seconds = persist_throttle_seconds
+        self._conn = None
+        # task_id -> (last_write_ts, last_status)，用于同状态进度更新的写入节流
+        self._last_persist: Dict[str, Tuple[float, str]] = {}
         os.makedirs(self.state_dir, exist_ok=True)
 
     def legacy_state_file(self, task_id):
@@ -35,10 +44,9 @@ class TaskStatePersistence:
         return os.path.join(self.state_dir, f"{safe_name}.json")
 
     def enabled(self):
-        return "unittest" not in sys.modules
+        return self._enabled
 
-    def connect(self):
-        conn = sqlite3.connect(self.db_path, timeout=10)
+    def _init_schema(self, conn):
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS task_states (
@@ -62,7 +70,35 @@ class TaskStatePersistence:
                 completed_at REAL
             )
         """)
-        return conn
+        # 历史分页按 completed_at DESC, updated_at DESC 排序，补对应索引
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_task_history_completed
+            ON task_history(completed_at DESC, updated_at DESC)
+        """)
+        # schema 版本号：仅在新库（user_version=0）时写入，便于后续迁移识别
+        version = int(conn.execute("PRAGMA user_version").fetchone()[0])
+        if version == 0:
+            conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+        conn.commit()
+
+    def connect(self):
+        # 复用单个连接：check_same_thread=False + self.lock（RLock）串行化保证跨线程安全；
+        # schema 只在首次建连时初始化一次，避免每次操作重复 CREATE TABLE + PRAGMA。
+        with self.lock:
+            if self._conn is None:
+                conn = sqlite3.connect(self.db_path, timeout=10, check_same_thread=False)
+                self._init_schema(conn)
+                self._conn = conn
+            return self._conn
+
+    def close(self):
+        with self.lock:
+            if self._conn is not None:
+                try:
+                    self._conn.close()
+                except Exception:
+                    pass
+                self._conn = None
 
     def migrate_legacy_state_files(self):
         if not self.enabled():
@@ -83,20 +119,30 @@ class TaskStatePersistence:
     def persist_state(self, task_id, state):
         if not task_id or not self.enabled():
             return
+        payload = dict(state or {})
+        status = payload.get("status")
+        key = str(task_id)
+        is_terminal = status in self.terminal_states
+        now = time.time()
         try:
-            payload = dict(state or {})
-            with self.lock, self.connect() as conn:
-                now = time.time()
-                state_json = json.dumps(payload, ensure_ascii=False)
-                conn.execute(
-                    "INSERT OR REPLACE INTO task_states(task_id, state_json, updated_at) VALUES (?, ?, ?)",
-                    (str(task_id), state_json, now),
-                )
-                if payload.get("status") in self.terminal_states:
+            with self.lock:
+                # 节流：同状态的高频进度更新在窗口内跳过落库（终态与状态切换始终写）
+                if not is_terminal:
+                    last = self._last_persist.get(key)
+                    if last and last[1] == status and (now - last[0]) < self.persist_throttle_seconds:
+                        return
+                with self.connect() as conn:
+                    state_json = json.dumps(payload, ensure_ascii=False)
                     conn.execute(
-                        "INSERT OR REPLACE INTO task_history(task_id, state_json, updated_at, completed_at) VALUES (?, ?, ?, ?)",
-                        (str(task_id), state_json, now, payload.get("finish_time") or now),
+                        "INSERT OR REPLACE INTO task_states(task_id, state_json, updated_at) VALUES (?, ?, ?)",
+                        (key, state_json, now),
                     )
+                    if is_terminal:
+                        conn.execute(
+                            "INSERT OR REPLACE INTO task_history(task_id, state_json, updated_at, completed_at) VALUES (?, ?, ?, ?)",
+                            (key, state_json, now, payload.get("finish_time") or now),
+                        )
+                self._last_persist[key] = (now, status)
         except Exception as exc:
             self.warning_logger(f"[{task_id}] 持久化任务状态失败: {exc}")
 
@@ -106,6 +152,7 @@ class TaskStatePersistence:
         try:
             with self.lock, self.connect() as conn:
                 conn.execute("DELETE FROM task_states WHERE task_id = ?", (str(task_id),))
+            self._last_persist.pop(str(task_id), None)
         except Exception as exc:
             self.warning_logger(f"[{task_id}] 删除持久化任务状态失败: {exc}")
 
@@ -153,9 +200,26 @@ class TaskStatePersistence:
         stamp = datetime.now().strftime("%Y%m%d")
         backup_path = os.path.join(self.backup_dir, f"tasks-{stamp}.sqlite3")
         try:
-            with self.lock, self.connect() as source:
-                with sqlite3.connect(backup_path) as target:
+            with self.lock:
+                source = self.connect()
+                target = sqlite3.connect(backup_path)
+                try:
                     source.backup(target)
+                finally:
+                    target.close()
+            # 一致性校验：独立打开备份做 integrity_check，失败则丢弃该备份
+            check_conn = sqlite3.connect(backup_path)
+            try:
+                result = check_conn.execute("PRAGMA integrity_check").fetchone()
+            finally:
+                check_conn.close()
+            if not result or result[0] != "ok":
+                self.warning_logger(f"SQLite 备份一致性校验失败: {result}")
+                try:
+                    os.remove(backup_path)
+                except OSError:
+                    pass
+                return None
             cutoff = time.time() - self.backup_retention_days * 24 * 3600
             for name in os.listdir(self.backup_dir):
                 path = os.path.join(self.backup_dir, name)

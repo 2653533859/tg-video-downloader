@@ -87,10 +87,9 @@ class TestStateManager:
 
 
 class TestTaskStatePersistence:
-    def test_persist_load_and_query_history(self, monkeypatch):
+    def test_persist_load_and_query_history(self):
         from src.state.persistence import TaskStatePersistence
 
-        monkeypatch.delitem(sys.modules, "unittest", raising=False)
         with tempfile.TemporaryDirectory() as state_dir:
             store = TaskStatePersistence(
                 state_dir=state_dir,
@@ -107,11 +106,11 @@ class TestTaskStatePersistence:
             items, total = store.query_history([], status="done", query="video", page=1, per_page=10)
             assert total == 1
             assert items[0]["task_id"] == "t1"
+            store.close()
 
-    def test_tdl_fallback_cache(self, monkeypatch):
+    def test_tdl_fallback_cache(self):
         from src.state.persistence import TaskStatePersistence
 
-        monkeypatch.delitem(sys.modules, "unittest", raising=False)
         with tempfile.TemporaryDirectory() as state_dir:
             store = TaskStatePersistence(
                 state_dir=state_dir,
@@ -120,6 +119,63 @@ class TestTaskStatePersistence:
             assert store.has_tdl_fallback_channel(-100123) is False
             store.remember_tdl_fallback_channel(-100123, "failed")
             assert store.has_tdl_fallback_channel(-100123) is True
+            store.close()
+
+    def test_enabled_flag_no_test_awareness(self):
+        from src.state.persistence import TaskStatePersistence
+
+        with tempfile.TemporaryDirectory() as state_dir:
+            # 默认启用（不再感知 unittest 模块）；显式关闭时所有写入为 no-op
+            enabled_store = TaskStatePersistence(state_dir=state_dir, terminal_states={"done"})
+            assert enabled_store.enabled() is True
+            enabled_store.close()
+
+            disabled_store = TaskStatePersistence(
+                state_dir=state_dir, terminal_states={"done"}, enabled=False
+            )
+            assert disabled_store.enabled() is False
+            disabled_store.persist_state("x", {"status": "done"})
+            assert disabled_store.load_states() == ({}, 0)
+
+    def test_persist_throttle_skips_same_status(self):
+        from src.state.persistence import TaskStatePersistence
+
+        with tempfile.TemporaryDirectory() as state_dir:
+            store = TaskStatePersistence(
+                state_dir=state_dir,
+                terminal_states={"done", "error", "cancelled"},
+                persist_throttle_seconds=60,
+            )
+            # 首次写入落库
+            store.persist_state("t1", {"status": "downloading", "progress": 1})
+            # 同状态窗口内的进度更新被节流跳过（DB 仍是第一版）
+            store.persist_state("t1", {"status": "downloading", "progress": 2})
+            with store.connect() as conn:
+                row = conn.execute("SELECT state_json FROM task_states WHERE task_id='t1'").fetchone()
+            assert '"progress": 1' in row[0]
+            # 状态切换到终态必定写入，且进入 history
+            store.persist_state("t1", {"status": "done", "progress": 3, "finish_time": 9})
+            with store.connect() as conn:
+                row = conn.execute("SELECT state_json FROM task_states WHERE task_id='t1'").fetchone()
+                hist = conn.execute("SELECT COUNT(*) FROM task_history WHERE task_id='t1'").fetchone()
+            assert '"progress": 3' in row[0]
+            assert hist[0] == 1
+            store.close()
+
+    def test_schema_version_and_backup_integrity(self):
+        from src.state.persistence import TaskStatePersistence, SCHEMA_VERSION
+
+        with tempfile.TemporaryDirectory() as state_dir:
+            store = TaskStatePersistence(state_dir=state_dir, terminal_states={"done"})
+            store.persist_state("t1", {"status": "done", "finish_time": 1})
+            with store.connect() as conn:
+                version = int(conn.execute("PRAGMA user_version").fetchone()[0])
+            assert version == SCHEMA_VERSION
+            backup_path = store.backup_database()
+            assert backup_path is not None
+            assert os.path.exists(backup_path)
+            store.close()
+
 
 
 # ==================== 下载队列 ====================
