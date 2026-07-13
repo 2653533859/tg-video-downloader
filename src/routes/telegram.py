@@ -6,6 +6,13 @@ from flask import Blueprint, jsonify, request, send_file, Response
 import os
 import re
 import threading
+from telethon.errors import (
+    FloodWaitError,
+    PhoneCodeExpiredError,
+    PhoneCodeInvalidError,
+    PhoneNumberInvalidError,
+    SessionPasswordNeededError,
+)
 from src.files.thumbnails import thumbnail_cache_path, write_thumbnail
 from src.telegram.video_service import TelegramVideoService
 
@@ -29,6 +36,14 @@ _video_service = None
 _get_video_info = None
 _build_relay_url = None
 
+# TG 网页登录（交互式，有状态）：send_code 与 sign_in 跨两次 HTTP，phone_code_hash
+# 必须由服务端保存。单用户 → 一个受锁保护的 slot 足够。
+_login_run_async = None
+_finalize_login = None
+_get_login_state = None
+_login_lock = threading.Lock()
+_login_pending = {}
+
 # 缓存
 cache_lock = threading.RLock()
 _current_entity_cache = {}
@@ -48,7 +63,9 @@ def init_blueprint(deps):
           get_cached_message_func, resolve_message_func, abort_debug_func, thumb_dir,
           relay_token_secret, dialogs_cache_ref, current_entity_cache_ref,
           videos_cache_ref, replies_cache_ref, video_service(可选),
-          get_video_info_func(可选), build_relay_url_func(可选)
+          get_video_info_func(可选), build_relay_url_func(可选),
+          login_run_async_func(可选), finalize_login_func(可选),
+          get_login_state_func(可选)
     """
     global _tg_client, _run_async, _kickoff_dialogs_refresh, _dialogs_cache_snapshot
     global _resolve_requested_entity, _video_info_for_message, _make_excerpt
@@ -57,6 +74,7 @@ def init_blueprint(deps):
     global _dialogs_cache, _current_entity_cache, _videos_cache, _replies_cache
     global _video_service
     global _get_video_info, _build_relay_url
+    global _login_run_async, _finalize_login, _get_login_state
 
     _tg_client = deps["tg_client"]
     _run_async = deps["run_async_func"]
@@ -73,6 +91,9 @@ def init_blueprint(deps):
     _RELAY_TOKEN_SECRET = deps["relay_token_secret"]
     _get_video_info = deps.get("get_video_info_func")
     _build_relay_url = deps.get("build_relay_url_func")
+    _login_run_async = deps.get("login_run_async_func")
+    _finalize_login = deps.get("finalize_login_func")
+    _get_login_state = deps.get("get_login_state_func")
 
     # 使用引用，避免复制
     _dialogs_cache = deps["dialogs_cache_ref"]
@@ -307,3 +328,91 @@ def api_online_play_url():
         })
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
+
+
+# ── Telegram 网页登录向导 ────────────────────────────────────────────────
+# 这些端点天然处在 Web 鉴权之后（仅 /login 与 health 探针豁免），暴露的是“登录
+# 本机配置的那个 TG 账号”，因此非本地部署务必配 WEB_AUTH_*（fail-closed 已保证）。
+
+def _login_error_response(exc):
+    """把 Telethon 登录异常翻译为友好中文提示 + 合适状态码。"""
+    if isinstance(exc, PhoneNumberInvalidError):
+        return jsonify({"error": "手机号格式无效，请带国家码（如 +8613800138000）"}), 400
+    if isinstance(exc, PhoneCodeInvalidError):
+        return jsonify({"error": "验证码错误，请重新输入"}), 400
+    if isinstance(exc, PhoneCodeExpiredError):
+        return jsonify({"error": "验证码已过期，请重新获取"}), 400
+    if isinstance(exc, FloodWaitError):
+        return jsonify({"error": f"操作过于频繁，请 {getattr(exc, 'seconds', '稍后')} 秒后重试"}), 429
+    return jsonify({"error": f"登录失败: {exc}"}), 500
+
+
+@bp.route("/api/tg/login/status")
+def api_tg_login_status():
+    """登录状态：{authorized, needs_login}。"""
+    if not _get_login_state:
+        return jsonify({"authorized": False, "needs_login": False})
+    return jsonify(_get_login_state())
+
+
+@bp.route("/api/tg/login/send_code", methods=["POST"])
+def api_tg_login_send_code():
+    """第一步：发送验证码。保存 phone + phone_code_hash 到服务端锁保护 slot。"""
+    if not _login_run_async:
+        return jsonify({"error": "登录功能不可用"}), 503
+    phone = ((request.get_json(silent=True) or {}).get("phone") or "").strip()
+    if not phone:
+        return jsonify({"error": "请输入手机号"}), 400
+    try:
+        sent = _login_run_async(lambda: _tg_client.send_code_request(phone))
+    except Exception as exc:
+        return _login_error_response(exc)
+    with _login_lock:
+        _login_pending["phone"] = phone
+        _login_pending["phone_code_hash"] = getattr(sent, "phone_code_hash", None)
+    return jsonify({"ok": True, "code_needed": True})
+
+
+@bp.route("/api/tg/login/sign_in", methods=["POST"])
+def api_tg_login_sign_in():
+    """第二步：提交验证码登录。若开启两步验证，返回 password_needed。"""
+    if not _login_run_async:
+        return jsonify({"error": "登录功能不可用"}), 503
+    code = ((request.get_json(silent=True) or {}).get("code") or "").strip()
+    if not code:
+        return jsonify({"error": "请输入验证码"}), 400
+    with _login_lock:
+        phone = _login_pending.get("phone")
+        phone_code_hash = _login_pending.get("phone_code_hash")
+    if not phone or not phone_code_hash:
+        return jsonify({"error": "登录会话已失效，请重新获取验证码"}), 400
+    try:
+        _login_run_async(
+            lambda: _tg_client.sign_in(phone, code, phone_code_hash=phone_code_hash)
+        )
+    except SessionPasswordNeededError:
+        return jsonify({"ok": True, "password_needed": True})
+    except Exception as exc:
+        return _login_error_response(exc)
+    user = _finalize_login() if _finalize_login else ""
+    with _login_lock:
+        _login_pending.clear()
+    return jsonify({"ok": True, "user": user})
+
+
+@bp.route("/api/tg/login/password", methods=["POST"])
+def api_tg_login_password():
+    """第三步（可选）：提交两步验证密码。"""
+    if not _login_run_async:
+        return jsonify({"error": "登录功能不可用"}), 503
+    password = (request.get_json(silent=True) or {}).get("password") or ""
+    if not password:
+        return jsonify({"error": "请输入两步验证密码"}), 400
+    try:
+        _login_run_async(lambda: _tg_client.sign_in(password=password))
+    except Exception as exc:
+        return _login_error_response(exc)
+    user = _finalize_login() if _finalize_login else ""
+    with _login_lock:
+        _login_pending.clear()
+    return jsonify({"ok": True, "user": user})

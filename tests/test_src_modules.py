@@ -1191,6 +1191,144 @@ class TestEnforceAccessControl:
             assert resp.status_code != 401, path
 
 
+class TestTelegramLoginRoutes:
+    """Telegram 网页登录向导端点：send_code/sign_in/2FA/错误分支/finalize。"""
+
+    def _make_client(self, login_runner, finalize=None, state=None):
+        from flask import Flask
+        from unittest.mock import Mock
+        from src.routes import telegram
+
+        telegram._login_pending.clear()
+        deps = {
+            "tg_client": Mock(),
+            "run_async_func": lambda *a, **k: None,
+            "kickoff_dialogs_func": lambda **k: False,
+            "dialogs_snapshot_func": lambda: {
+                "dialogs": [], "loading": False, "error": "", "updated_at": 0,
+            },
+            "resolve_entity_func": lambda **k: (None, ""),
+            "video_info_func": lambda *a, **k: None,
+            "make_excerpt_func": lambda *a, **k: "",
+            "message_text_func": lambda *a, **k: "",
+            "get_cached_message_func": lambda *a, **k: None,
+            "resolve_message_func": lambda *a, **k: None,
+            "abort_debug_func": lambda: None,
+            "thumb_dir": "/tmp",
+            "relay_token_secret": "",
+            "dialogs_cache_ref": [],
+            "current_entity_cache_ref": {},
+            "videos_cache_ref": {},
+            "replies_cache_ref": {},
+            "video_service": Mock(),
+            "login_run_async_func": login_runner,
+            "finalize_login_func": finalize or (lambda: "Alice"),
+            "get_login_state_func": state or (lambda: {"authorized": False, "needs_login": True}),
+        }
+        telegram.init_blueprint(deps)
+        app = Flask(__name__)
+        app.register_blueprint(telegram.bp)
+        return app.test_client(), telegram
+
+    def test_login_status_reports_state(self):
+        client, _tg = self._make_client(
+            lambda f: None,
+            state=lambda: {"authorized": True, "needs_login": False},
+        )
+        data = client.get("/api/tg/login/status").get_json()
+        assert data == {"authorized": True, "needs_login": False}
+
+    def test_send_code_stores_hash(self):
+        from unittest.mock import Mock
+
+        client, tg = self._make_client(lambda f: Mock(phone_code_hash="HASH123"))
+        resp = client.post("/api/tg/login/send_code", json={"phone": "+8613800138000"})
+        assert resp.status_code == 200
+        assert resp.get_json()["code_needed"] is True
+        assert tg._login_pending["phone"] == "+8613800138000"
+        assert tg._login_pending["phone_code_hash"] == "HASH123"
+
+    def test_send_code_requires_phone(self):
+        client, _tg = self._make_client(lambda f: None)
+        resp = client.post("/api/tg/login/send_code", json={})
+        assert resp.status_code == 400
+
+    def test_sign_in_success_finalizes(self):
+        from unittest.mock import Mock
+
+        finalize_calls = []
+
+        def finalize():
+            finalize_calls.append(True)
+            return "Alice (@alice)"
+
+        client, tg = self._make_client(
+            lambda f: Mock(phone_code_hash="H"), finalize=finalize
+        )
+        client.post("/api/tg/login/send_code", json={"phone": "+100"})
+
+        # sign_in 成功（login_runner 返回 None，不抛异常）
+        def runner(_factory):
+            return None
+
+        tg._login_run_async = runner
+        resp = client.post("/api/tg/login/sign_in", json={"code": "12345"})
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert body["ok"] is True
+        assert body["user"] == "Alice (@alice)"
+        assert finalize_calls == [True]
+        # 成功后 pending 清空
+        assert tg._login_pending == {}
+
+    def test_sign_in_password_needed(self):
+        from unittest.mock import Mock
+        from telethon.errors import SessionPasswordNeededError
+
+        client, tg = self._make_client(lambda f: Mock(phone_code_hash="H"))
+        client.post("/api/tg/login/send_code", json={"phone": "+100"})
+
+        def runner(_factory):
+            raise SessionPasswordNeededError(request=None)
+
+        tg._login_run_async = runner
+        resp = client.post("/api/tg/login/sign_in", json={"code": "12345"})
+        assert resp.status_code == 200
+        assert resp.get_json()["password_needed"] is True
+
+    def test_sign_in_invalid_code_friendly_error(self):
+        from unittest.mock import Mock
+        from telethon.errors import PhoneCodeInvalidError
+
+        client, tg = self._make_client(lambda f: Mock(phone_code_hash="H"))
+        client.post("/api/tg/login/send_code", json={"phone": "+100"})
+
+        def runner(_factory):
+            raise PhoneCodeInvalidError(request=None)
+
+        tg._login_run_async = runner
+        resp = client.post("/api/tg/login/sign_in", json={"code": "00000"})
+        assert resp.status_code == 400
+        assert "验证码错误" in resp.get_json()["error"]
+
+    def test_sign_in_without_pending_rejected(self):
+        client, tg = self._make_client(lambda f: None)
+        tg._login_pending.clear()
+        resp = client.post("/api/tg/login/sign_in", json={"code": "123"})
+        assert resp.status_code == 400
+        assert "失效" in resp.get_json()["error"]
+
+    def test_password_success_finalizes(self):
+        finalize_calls = []
+        client, tg = self._make_client(
+            lambda f: None, finalize=lambda: finalize_calls.append(True) or "Bob"
+        )
+        resp = client.post("/api/tg/login/password", json={"password": "secret"})
+        assert resp.status_code == 200
+        assert resp.get_json()["user"] == "Bob"
+        assert finalize_calls == [True]
+
+
 class TestSystemStatusService:
     def test_status_and_health_payload(self):
         from src.system import SystemStatusService
@@ -1746,14 +1884,20 @@ class TestTelegramStartup:
         assert ("connected", "Alice (@alice)") in callbacks
         assert "health" in callbacks
 
-    def test_run_main_telegram_client_exits_when_unauthorized(self):
+    def test_run_main_telegram_client_stays_alive_when_unauthorized(self):
+        # 未授权时不再退出进程：应 mark_needs_login、不调用 exit_func、保活 run_forever。
         from src.telegram import run_main_telegram_client
 
         class Runtime:
             def __init__(self):
                 self.connect_error = ""
+                self.needs_login = False
 
             def mark_error(self, message):
+                self.connect_error = message
+
+            def mark_needs_login(self, message):
+                self.needs_login = True
                 self.connect_error = message
 
             def mark_connected(self, _user_info):
@@ -1772,27 +1916,32 @@ class TestTelegramStartup:
         loop = asyncio.new_event_loop()
         runtime = Runtime()
         errors = []
+        exit_calls = []
+        health_calls = []
 
         try:
-            with pytest.raises(SystemExit):
-                run_main_telegram_client(
-                    client=Client(),
-                    loop=loop,
-                    runtime=runtime,
-                    format_user_display=lambda user: user.first_name,
-                    init_health_checker=lambda: None,
-                    on_connecting=lambda _message: None,
-                    on_connected=lambda _user_info: None,
-                    on_error=errors.append,
-                    log_info=lambda _message: None,
-                    print_func=lambda _message: None,
-                    sleep_func=lambda _seconds: None,
-                )
+            run_main_telegram_client(
+                client=Client(),
+                loop=loop,
+                runtime=runtime,
+                format_user_display=lambda user: user.first_name,
+                init_health_checker=lambda: health_calls.append(True),
+                on_connecting=lambda _message: None,
+                # 未授权分支在 run_forever 前调用 on_error；此处顺手停 loop 让其立即返回
+                on_connected=lambda _user_info: None,
+                on_error=lambda message: (errors.append(message), loop.stop()),
+                log_info=lambda _message: None,
+                print_func=lambda _message: None,
+                sleep_func=lambda _seconds: None,
+                exit_func=lambda _code: exit_calls.append(_code),
+            )
         finally:
             loop.close()
 
-        assert runtime.connect_error == "Telegram 未登录！请先运行 login.py 完成登录。"
-        assert errors == ["Telegram 未登录！请先运行 login.py 完成登录。"]
+        assert runtime.needs_login is True
+        assert exit_calls == []          # 关键：绝不退出进程
+        assert health_calls == []        # 未授权不启动健康检查
+        assert errors and "网页向导" in errors[0]
 
     def test_run_main_telegram_client_retries_on_connect_error(self):
         from src.telegram import run_main_telegram_client

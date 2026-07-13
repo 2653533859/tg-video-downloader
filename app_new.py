@@ -122,6 +122,9 @@ def init_all_blueprints():
         "video_service": runtime.telegram_video_service,
         "get_video_info_func": runtime.get_video_info,
         "build_relay_url_func": runtime.build_relay_url,
+        "login_run_async_func": runtime.login_run_async,
+        "finalize_login_func": runtime.finalize_tg_login,
+        "get_login_state_func": runtime.get_tg_login_state,
     })
 
     download.init_blueprint({

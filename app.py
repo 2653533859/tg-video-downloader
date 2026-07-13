@@ -1943,6 +1943,35 @@ def start_tg_client():
     )
 
 
+def login_run_async(coro_factory, timeout=60):
+    """在主 tg_loop 上直接执行登录协程。
+
+    刻意绕过 run_async → ensure_connection：未授权时 client 虽已 transport 连接，
+    但不应把 tg_runtime.connected 置真（那会让 /api/status 误报已连接）。登录成功后
+    统一由 finalize_tg_login 设置状态。
+    """
+    future = asyncio.run_coroutine_threadsafe(coro_factory(), tg_loop)
+    return future.result(timeout=timeout)
+
+
+def finalize_tg_login():
+    """网页登录成功后收尾：get_me → mark_connected → 启动健康检查。返回用户显示名。"""
+    me = login_run_async(lambda: tg_client.get_me())
+    user_info = _format_user_display(me)
+    tg_runtime.mark_connected(user_info)
+    _sync_tg_runtime_state()
+    init_tg_health_checker()
+    log_info(f"Telegram 网页登录成功: {user_info}")
+    return user_info
+
+
+def get_tg_login_state():
+    return {
+        "authorized": bool(tg_runtime.connected),
+        "needs_login": bool(getattr(tg_runtime, "needs_login", False)),
+    }
+
+
 def start_relay_tg_client():
     run_relay_telegram_client(
         loop=relay_loop,

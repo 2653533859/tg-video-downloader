@@ -29,6 +29,7 @@ class TelegramRuntime:
         self.connected = False
         self.connect_error = ""
         self.user_info = ""
+        self.needs_login = False   # 会话未授权：等待网页登录向导完成登录
         self.reconnect_lock = threading.Lock()          # 保护重连状态标志（快，不长持）
         self.client_reconnect_lock = threading.Lock()   # 串行化对 client 的真实 connect/disconnect
         self.last_reconnect_attempt = 0.0
@@ -63,11 +64,18 @@ class TelegramRuntime:
     def mark_connected(self, user_info=""):
         self.connected = True
         self.connect_error = ""
+        self.needs_login = False
         if user_info:
             self.user_info = user_info
 
     def mark_error(self, message):
         self.connected = False
+        self.connect_error = message
+
+    def mark_needs_login(self, message="Telegram 未登录，请通过网页向导登录"):
+        """会话文件缺失/未授权：不再退出进程，保活等待网页登录。"""
+        self.connected = False
+        self.needs_login = True
         self.connect_error = message
 
     def ensure_connection(self, allow_reconnect=True):

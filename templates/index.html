@@ -14,6 +14,7 @@
   <div class="header">
     <h1>TG 视频下载器 · TDL 版</h1>
     <div class="conn-status conn-loading" id="connStatus"><span class="dot"></span> 连接中...</div>
+    <button class="btn btn-sm" id="tgLoginBtn" style="display:none" onclick="openTgLogin()">登录 Telegram</button>
     <button class="btn btn-sm btn-outline" id="logoutBtn" style="display:none" onclick="doLogout()">登出</button>
     <div class="search-box">
       <input id="searchInput" placeholder="频道链接或 @用户名" onkeydown="if(event.key==='Enter')doSearch()">
@@ -160,6 +161,34 @@
       <button class="modal-close" onclick="closePreview()">&times;</button>
       <video id="previewVideo" controls autoplay></video>
       <div class="modal-title" id="previewTitle"></div>
+    </div>
+  </div>
+
+  <!-- Telegram 登录向导 -->
+  <div class="modal-overlay hidden" id="tgLoginModal" onclick="closeTgLogin(event)">
+    <div class="modal-content" style="max-width:380px;padding:28px;text-align:left;">
+      <button class="modal-close" onclick="closeTgLogin()">&times;</button>
+      <h3 style="margin:0 0 4px;color:var(--accent)">登录 Telegram</h3>
+      <div style="font-size:12px;color:#888;margin-bottom:18px;">在网页完成手机号 / 验证码 / 两步验证登录</div>
+      <div id="tgStepPhone" class="tg-step">
+        <label style="display:block;font-size:13px;color:#aaa;margin-bottom:6px;">手机号（带国家码）</label>
+        <input id="tgPhone" placeholder="+8613800138000"
+          style="width:100%;box-sizing:border-box;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:10px;margin-bottom:12px;">
+        <button class="btn" id="tgSendCodeBtn" onclick="tgSendCode()" style="width:100%;">发送验证码</button>
+      </div>
+      <div id="tgStepCode" class="tg-step" style="display:none">
+        <label style="display:block;font-size:13px;color:#aaa;margin-bottom:6px;">验证码</label>
+        <input id="tgCode" inputmode="numeric" placeholder="Telegram 收到的登录码"
+          style="width:100%;box-sizing:border-box;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:10px;margin-bottom:12px;">
+        <button class="btn" id="tgSignInBtn" onclick="tgSignIn()" style="width:100%;">登录</button>
+      </div>
+      <div id="tgStepPassword" class="tg-step" style="display:none">
+        <label style="display:block;font-size:13px;color:#aaa;margin-bottom:6px;">两步验证密码</label>
+        <input id="tgPassword" type="password" autocomplete="current-password"
+          style="width:100%;box-sizing:border-box;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:10px;margin-bottom:12px;">
+        <button class="btn" id="tgPasswordBtn" onclick="tgSubmitPassword()" style="width:100%;">提交</button>
+      </div>
+      <div class="tg-login-msg" id="tgLoginMsg" style="min-height:18px;margin-top:12px;font-size:13px;color:#ff6b6b;"></div>
     </div>
   </div>
 

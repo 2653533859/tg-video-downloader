@@ -38,11 +38,16 @@ def run_main_telegram_client(
             )
 
             if not loop.run_until_complete(client.is_user_authorized()):
-                error_message = "Telegram 未登录！请先运行 login.py 完成登录。"
-                runtime.mark_error(error_message)
-                on_error(error_message)
-                print_func(f"错误: {error_message}")
-                exit_func(1)
+                # 未授权不再退出进程：保活事件循环，供网页登录向导调用登录 API。
+                # 不启动健康检查（避免对未授权 client 反复重连刷日志）；登录成功后
+                # 由登录 API 的 finalize 负责 mark_connected + 启动健康检查。
+                message = "Telegram 未登录，请通过网页向导登录（或运行 login.py）。"
+                runtime.mark_needs_login(message)
+                on_error(message)
+                print_func(f"提示: {message}")
+                log_info(message)
+                loop.run_forever()
+                break
 
             me = loop.run_until_complete(client.get_me())
             user_info = format_user_display(me)

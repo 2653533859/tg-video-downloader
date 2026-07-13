@@ -153,6 +153,8 @@ let currentEntity = null;
         if (data.connected && !data.error) {
           el.className = 'conn-status conn-ok';
           el.innerHTML = '<span class="dot"></span> ' + esc(data.user);
+          const tgBtn = document.getElementById('tgLoginBtn');
+          if (tgBtn) tgBtn.style.display = 'none';
           if (!isConnected) {
             isConnected = true;
             loadDialogs();  // 连接成功后自动加载对话
@@ -162,6 +164,7 @@ let currentEntity = null;
           el.innerHTML = '<span class="dot"></span> ' + esc(data.error || '未连接');
           isConnected = false;
           document.getElementById('dialogList').innerHTML = '<div class="empty">' + esc(data.error || 'Telegram 未连接') + '</div>';
+          maybeShowTgLogin();
         }
       }).catch(() => {
         const el = document.getElementById('connStatus');
@@ -190,6 +193,93 @@ let currentEntity = null;
     }
     window.doLogout = doLogout;
     refreshAuthUi();
+
+    // ── Telegram 网页登录向导 ──────────────────────────────────────────
+    function maybeShowTgLogin() {
+      fetch('/api/tg/login/status').then(r => r.json()).then(s => {
+        const btn = document.getElementById('tgLoginBtn');
+        if (btn) btn.style.display = s.needs_login ? '' : 'none';
+      }).catch(() => {});
+    }
+    window.maybeShowTgLogin = maybeShowTgLogin;
+
+    function tgStep(step) {
+      ['Phone', 'Code', 'Password'].forEach(s => {
+        const el = document.getElementById('tgStep' + s);
+        if (el) el.style.display = (s === step) ? '' : 'none';
+      });
+    }
+    function tgMsg(text, ok) {
+      const el = document.getElementById('tgLoginMsg');
+      if (el) { el.textContent = text || ''; el.style.color = ok ? '#4caf50' : '#ff6b6b'; }
+    }
+    function openTgLogin() {
+      tgStep('Phone');
+      tgMsg('');
+      const m = document.getElementById('tgLoginModal');
+      if (m) m.classList.remove('hidden');
+    }
+    function closeTgLogin(evt) {
+      if (evt && evt.target && evt.target.id !== 'tgLoginModal' && !evt.target.classList.contains('modal-close')) return;
+      const m = document.getElementById('tgLoginModal');
+      if (m) m.classList.add('hidden');
+    }
+    async function tgPost(url, body, btnId, busyText) {
+      const btn = btnId && document.getElementById(btnId);
+      const label = btn && btn.textContent;
+      if (btn) { btn.disabled = true; btn.textContent = busyText; }
+      try {
+        const resp = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const data = await resp.json().catch(() => ({}));
+        return { ok: resp.ok, data };
+      } catch (e) {
+        return { ok: false, data: { error: '网络错误，请重试' } };
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = label; }
+      }
+    }
+    async function tgSendCode() {
+      const phone = document.getElementById('tgPhone').value.trim();
+      if (!phone) { tgMsg('请输入手机号'); return; }
+      tgMsg('发送中...', true);
+      const { ok, data } = await tgPost('/api/tg/login/send_code', { phone }, 'tgSendCodeBtn', '发送中...');
+      if (ok && data.code_needed) { tgStep('Code'); tgMsg('验证码已发送，请查收', true); }
+      else tgMsg(data.error || '发送失败');
+    }
+    async function tgSignIn() {
+      const code = document.getElementById('tgCode').value.trim();
+      if (!code) { tgMsg('请输入验证码'); return; }
+      tgMsg('登录中...', true);
+      const { ok, data } = await tgPost('/api/tg/login/sign_in', { code }, 'tgSignInBtn', '登录中...');
+      if (ok && data.password_needed) { tgStep('Password'); tgMsg('该账号开启了两步验证，请输入密码', true); }
+      else if (ok && data.ok) tgLoginDone(data.user);
+      else tgMsg(data.error || '登录失败');
+    }
+    async function tgSubmitPassword() {
+      const password = document.getElementById('tgPassword').value;
+      if (!password) { tgMsg('请输入两步验证密码'); return; }
+      tgMsg('验证中...', true);
+      const { ok, data } = await tgPost('/api/tg/login/password', { password }, 'tgPasswordBtn', '验证中...');
+      if (ok && data.ok) tgLoginDone(data.user);
+      else tgMsg(data.error || '验证失败');
+    }
+    function tgLoginDone(user) {
+      tgMsg('登录成功：' + (user || ''), true);
+      setTimeout(() => {
+        closeTgLogin();
+        checkStatus();
+        if (typeof loadDialogs === 'function') loadDialogs({ forceRefresh: true });
+      }, 800);
+    }
+    window.openTgLogin = openTgLogin;
+    window.closeTgLogin = closeTgLogin;
+    window.tgSendCode = tgSendCode;
+    window.tgSignIn = tgSignIn;
+    window.tgSubmitPassword = tgSubmitPassword;
 
     restoreDownloadTasks();
     syncMobileLayout();
