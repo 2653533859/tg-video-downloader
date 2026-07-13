@@ -38,36 +38,19 @@ _status_lock = None
 _download_status = None
 
 
-def init_blueprint(
-    current_entity_cache,
-    make_task_id_func,
-    copy_task_state_func,
-    set_task_state_func,
-    update_task_state_func,
-    get_cached_message_func,
-    resolve_message_func,
-    mark_cancelled_func,
-    clear_cancelled_func,
-    supports_tdl_func,
-    enqueue_download_func,
-    remove_from_queue_func,
-    get_tdl_process_func,
-    get_download_status_func,
-    format_size_func,
-    get_video_info_func,
-    terminal_states,
-    last_download_dialog_ref,
-    resume_all_func=None,
-    resume_task_func=None,
-    move_queued_task_func=None,
-    drop_task_state_func=None,
-    clear_tdl_error_func=None,
-    clear_resume_info_func=None,
-    get_queue_status_func=None,
-    status_lock=None,
-    download_status_ref=None,
-):
-    """初始化 Blueprint 依赖"""
+def init_blueprint(deps):
+    """初始化 Blueprint 依赖（单一 deps 映射注入）。
+
+    必填 keys: current_entity_cache, make_task_id_func, copy_task_state_func,
+        set_task_state_func, update_task_state_func, get_cached_message_func,
+        resolve_message_func, mark_cancelled_func, clear_cancelled_func,
+        supports_tdl_func, enqueue_download_func, remove_from_queue_func,
+        get_tdl_process_func, get_download_status_func, format_size_func,
+        get_video_info_func, terminal_states, last_download_dialog_ref
+    可选 keys: resume_all_func, resume_task_func, move_queued_task_func,
+        drop_task_state_func, clear_tdl_error_func, clear_resume_info_func,
+        get_queue_status_func, status_lock, download_status_ref
+    """
     global _current_entity_cache, _make_task_id, _copy_task_state
     global _set_task_state, _update_task_state, _get_cached_message
     global _resolve_message, _mark_download_cancelled, _clear_download_cancelled
@@ -78,33 +61,33 @@ def init_blueprint(
     global _drop_task_state, _clear_tdl_error, _clear_resume_info
     global _get_queue_status, _status_lock, _download_status
 
-    _current_entity_cache = current_entity_cache
-    _make_task_id = make_task_id_func
-    _copy_task_state = copy_task_state_func
-    _set_task_state = set_task_state_func
-    _update_task_state = update_task_state_func
-    _get_cached_message = get_cached_message_func
-    _resolve_message = resolve_message_func
-    _mark_download_cancelled = mark_cancelled_func
-    _clear_download_cancelled = clear_cancelled_func
-    _supports_tdl_download = supports_tdl_func
-    _enqueue_download = enqueue_download_func
-    _remove_from_queue = remove_from_queue_func
-    _get_tdl_process = get_tdl_process_func
-    _get_download_status = get_download_status_func
-    _format_size = format_size_func
-    _get_video_info = get_video_info_func
-    _TERMINAL_STATES = terminal_states
-    _last_download_dialog = last_download_dialog_ref
-    _resume_all_incomplete_tasks = resume_all_func
-    _resume_task = resume_task_func
-    _move_queued_task = move_queued_task_func
-    _drop_task_state = drop_task_state_func
-    _clear_tdl_error = clear_tdl_error_func
-    _clear_resume_info = clear_resume_info_func
-    _get_queue_status = get_queue_status_func
-    _status_lock = status_lock
-    _download_status = download_status_ref
+    _current_entity_cache = deps["current_entity_cache"]
+    _make_task_id = deps["make_task_id_func"]
+    _copy_task_state = deps["copy_task_state_func"]
+    _set_task_state = deps["set_task_state_func"]
+    _update_task_state = deps["update_task_state_func"]
+    _get_cached_message = deps["get_cached_message_func"]
+    _resolve_message = deps["resolve_message_func"]
+    _mark_download_cancelled = deps["mark_cancelled_func"]
+    _clear_download_cancelled = deps["clear_cancelled_func"]
+    _supports_tdl_download = deps["supports_tdl_func"]
+    _enqueue_download = deps["enqueue_download_func"]
+    _remove_from_queue = deps["remove_from_queue_func"]
+    _get_tdl_process = deps["get_tdl_process_func"]
+    _get_download_status = deps["get_download_status_func"]
+    _format_size = deps["format_size_func"]
+    _get_video_info = deps["get_video_info_func"]
+    _TERMINAL_STATES = deps["terminal_states"]
+    _last_download_dialog = deps["last_download_dialog_ref"]
+    _resume_all_incomplete_tasks = deps.get("resume_all_func")
+    _resume_task = deps.get("resume_task_func")
+    _move_queued_task = deps.get("move_queued_task_func")
+    _drop_task_state = deps.get("drop_task_state_func")
+    _clear_tdl_error = deps.get("clear_tdl_error_func")
+    _clear_resume_info = deps.get("clear_resume_info_func")
+    _get_queue_status = deps.get("get_queue_status_func")
+    _status_lock = deps.get("status_lock")
+    _download_status = deps.get("download_status_ref")
 
 
 @bp.route("/api/download", methods=["POST"])

@@ -19,19 +19,15 @@ _request_ip_is_local = None
 OPEN_FOLDER_ENABLED = None
 
 
-def init_blueprint(resolve_path_func, is_local_func, open_folder_enabled):
-    """
-    初始化 Blueprint 依赖
+def init_blueprint(deps):
+    """初始化 Blueprint 依赖（单一 deps 映射注入）。
 
-    Args:
-        resolve_path_func: 路径解析函数
-        is_local_func: 本地 IP 检查函数
-        open_folder_enabled: 是否启用文件夹打开功能
+    keys: resolve_path_func, is_local_func, open_folder_enabled
     """
     global _resolve_download_path, _request_ip_is_local, OPEN_FOLDER_ENABLED
-    _resolve_download_path = resolve_path_func
-    _request_ip_is_local = is_local_func
-    OPEN_FOLDER_ENABLED = open_folder_enabled
+    _resolve_download_path = deps["resolve_path_func"]
+    _request_ip_is_local = deps["is_local_func"]
+    OPEN_FOLDER_ENABLED = deps["open_folder_enabled"]
 
 
 @bp.route("/")

@@ -58,7 +58,7 @@
 - [x] 重写 CLAUDE.md（按当前真实结构：入口委托关系、src/ 模块地图、真实状态名、5003 端口、无 aria2）；AGENTS.md 同步为镜像；README.md 全量重写（原文约七成引用已删文件或失实——Prometheus 端点不存在、"100% 覆盖"等，超出原定"仅修段落"范围）；tests/README.md、docs/WEBSOCKET_GUIDE.md 修正残留引用。
 - 验收结果：pytest **87 passed / 0 failed**（较 112 减少 25 个 = 被删死模块的测试数，属预期）；app_new 隔离环境冒烟导入成功、32 条路由、关键路由抽查通过；全仓库无已删模块的 import 残留。
 - [x] **P1-5b-1 ✅（2026-07-13 完成）**：用 ast 脚本精确摘除 app.py 死路由——32 个整函数（含 `enforce_access_control`/`index`）、2 个仅摘装饰器（`api_get_proxy_settings`/`api_set_proxy_settings`，函数体被 app_new 以 runtime 前缀调用故保留）、`app = Flask(__name__)` 实例、`url_map` 注册、孤立的 `SignedIntConverter` 类与未使用 flask 导入。app.py 从 2654 行减至 **1940 行**。验收：pytest 87 全绿、冒烟导入路由数 32 不变、关键路由抽查通过、无 `@app` 残留。逐函数引用分析确认 src/routes/ 的同名函数是独立 Blueprint 实现而非引用。
-- [ ] **P1-5b-2（待做）**：精简 app_new.py 每个 Blueprint 20-30 个参数的手工注入，改为传 runtime/服务对象（接口设计变更，单独成批）。
+- [x] **P1-5b-2 ✅（2026-07-13 完成）**：6 个 Blueprint 的 `init_blueprint` 从 20-30 个手工 kwargs 收敛为**接收单一 `deps` 映射对象**，内部解包到各自模块 globals（**路由处理函数零改动**，保留路由内部名与 app.py 命名的解耦）；app_new 对应 6 处调用改传 dict 字面量。说明：这是「传单一对象」的**结构收敛**；更深的「按职责重组成服务对象」（task_service/tg_service…）属服务层再设计，工作量大且需求未迫切，未纳入本批。验收：pytest **119 passed**、隔离装配 36 路由、六大类关键路由抽查全部命中。
 
 ### 6. 重构下载调度和线程生命周期（P1-6a/b/c ✅ 全部完成）
 

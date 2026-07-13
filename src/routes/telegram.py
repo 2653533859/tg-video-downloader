@@ -40,29 +40,16 @@ MAX_VIDEO_CACHE_SIZE = 100
 MAX_REPLY_CACHE_SIZE = 50
 
 
-def init_blueprint(
-    tg_client,
-    run_async_func,
-    kickoff_dialogs_func,
-    dialogs_snapshot_func,
-    resolve_entity_func,
-    video_info_func,
-    make_excerpt_func,
-    message_text_func,
-    get_cached_message_func,
-    resolve_message_func,
-    abort_debug_func,
-    thumb_dir,
-    relay_token_secret,
-    dialogs_cache_ref,
-    current_entity_cache_ref,
-    videos_cache_ref,
-    replies_cache_ref,
-    video_service=None,
-    get_video_info_func=None,
-    build_relay_url_func=None,
-):
-    """初始化 Blueprint 依赖"""
+def init_blueprint(deps):
+    """初始化 Blueprint 依赖（单一 deps 映射注入）。
+
+    keys: tg_client, run_async_func, kickoff_dialogs_func, dialogs_snapshot_func,
+          resolve_entity_func, video_info_func, make_excerpt_func, message_text_func,
+          get_cached_message_func, resolve_message_func, abort_debug_func, thumb_dir,
+          relay_token_secret, dialogs_cache_ref, current_entity_cache_ref,
+          videos_cache_ref, replies_cache_ref, video_service(可选),
+          get_video_info_func(可选), build_relay_url_func(可选)
+    """
     global _tg_client, _run_async, _kickoff_dialogs_refresh, _dialogs_cache_snapshot
     global _resolve_requested_entity, _video_info_for_message, _make_excerpt
     global _message_text, _get_cached_message, _resolve_message
@@ -71,28 +58,28 @@ def init_blueprint(
     global _video_service
     global _get_video_info, _build_relay_url
 
-    _tg_client = tg_client
-    _run_async = run_async_func
-    _kickoff_dialogs_refresh = kickoff_dialogs_func
-    _dialogs_cache_snapshot = dialogs_snapshot_func
-    _resolve_requested_entity = resolve_entity_func
-    _video_info_for_message = video_info_func
-    _make_excerpt = make_excerpt_func
-    _message_text = message_text_func
-    _get_cached_message = get_cached_message_func
-    _resolve_message = resolve_message_func
-    _abort_if_debug_disabled = abort_debug_func
-    _THUMB_DIR = thumb_dir
-    _RELAY_TOKEN_SECRET = relay_token_secret
-    _get_video_info = get_video_info_func
-    _build_relay_url = build_relay_url_func
+    _tg_client = deps["tg_client"]
+    _run_async = deps["run_async_func"]
+    _kickoff_dialogs_refresh = deps["kickoff_dialogs_func"]
+    _dialogs_cache_snapshot = deps["dialogs_snapshot_func"]
+    _resolve_requested_entity = deps["resolve_entity_func"]
+    _video_info_for_message = deps["video_info_func"]
+    _make_excerpt = deps["make_excerpt_func"]
+    _message_text = deps["message_text_func"]
+    _get_cached_message = deps["get_cached_message_func"]
+    _resolve_message = deps["resolve_message_func"]
+    _abort_if_debug_disabled = deps["abort_debug_func"]
+    _THUMB_DIR = deps["thumb_dir"]
+    _RELAY_TOKEN_SECRET = deps["relay_token_secret"]
+    _get_video_info = deps.get("get_video_info_func")
+    _build_relay_url = deps.get("build_relay_url_func")
 
     # 使用引用，避免复制
-    _dialogs_cache = dialogs_cache_ref
-    _current_entity_cache = current_entity_cache_ref
-    _videos_cache = videos_cache_ref
-    _replies_cache = replies_cache_ref
-    _video_service = video_service or TelegramVideoService(
+    _dialogs_cache = deps["dialogs_cache_ref"]
+    _current_entity_cache = deps["current_entity_cache_ref"]
+    _videos_cache = deps["videos_cache_ref"]
+    _replies_cache = deps["replies_cache_ref"]
+    _video_service = deps.get("video_service") or TelegramVideoService(
         client=_tg_client,
         run_async=_run_async,
         resolve_requested_entity=_resolve_requested_entity,

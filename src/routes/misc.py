@@ -28,36 +28,31 @@ _resolve_download_path = None
 _debug_service = None
 
 
-def init_blueprint(
-    download_dir,
-    format_size_func,
-    query_task_history_func,
-    get_download_status_func,
-    clear_all_tasks_func,
-    get_recovery_candidates_func,
-    recover_candidates_func,
-    abort_debug_func,
-    resolve_download_path_func,
-    clear_task_ids_func=None,
-    debug_service=None,
-):
-    """初始化 Blueprint 依赖"""
+def init_blueprint(deps):
+    """初始化 Blueprint 依赖（单一 deps 映射注入）。
+
+    keys: download_dir, format_size_func, query_task_history_func,
+          get_download_status_func, clear_all_tasks_func,
+          get_recovery_candidates_func, recover_candidates_func,
+          abort_debug_func, resolve_download_path_func,
+          clear_task_ids_func(可选), debug_service(可选)
+    """
     global _DOWNLOAD_DIR, _format_size, _query_task_history
     global _get_download_status, _clear_all_tasks, _clear_task_ids, _get_recovery_candidates
     global _recover_candidates, _abort_if_debug_disabled, _resolve_download_path
     global _debug_service
 
-    _DOWNLOAD_DIR = download_dir
-    _format_size = format_size_func
-    _query_task_history = query_task_history_func
-    _get_download_status = get_download_status_func
-    _clear_all_tasks = clear_all_tasks_func
-    _clear_task_ids = clear_task_ids_func
-    _get_recovery_candidates = get_recovery_candidates_func
-    _recover_candidates = recover_candidates_func
-    _abort_if_debug_disabled = abort_debug_func
-    _resolve_download_path = resolve_download_path_func
-    _debug_service = debug_service
+    _DOWNLOAD_DIR = deps["download_dir"]
+    _format_size = deps["format_size_func"]
+    _query_task_history = deps["query_task_history_func"]
+    _get_download_status = deps["get_download_status_func"]
+    _clear_all_tasks = deps["clear_all_tasks_func"]
+    _clear_task_ids = deps.get("clear_task_ids_func")
+    _get_recovery_candidates = deps["get_recovery_candidates_func"]
+    _recover_candidates = deps["recover_candidates_func"]
+    _abort_if_debug_disabled = deps["abort_debug_func"]
+    _resolve_download_path = deps["resolve_download_path_func"]
+    _debug_service = deps.get("debug_service")
 
 
 def _find_matching_download_task(folder, filename):

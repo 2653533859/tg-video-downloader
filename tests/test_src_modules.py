@@ -2236,19 +2236,19 @@ class TestRoutes:
 
         calls = {}
         app = Flask(__name__)
-        misc.init_blueprint(
-            download_dir="/tmp",
-            format_size_func=lambda size: str(size),
-            query_task_history_func=lambda *_args: {},
-            get_download_status_func=lambda: {},
-            clear_all_tasks_func=lambda scope: calls.setdefault("scope", scope) or 0,
-            get_recovery_candidates_func=lambda: [],
-            recover_candidates_func=lambda task_ids: {"ok": True, "submitted": task_ids, "errors": {}},
-            abort_debug_func=lambda: None,
-            resolve_download_path_func=lambda *_args, **_kwargs: "/tmp",
-            clear_task_ids_func=lambda task_ids: {"ok": True, "cleared": len(task_ids), "skipped": 0},
-            debug_service=Mock(),
-        )
+        misc.init_blueprint({
+            "download_dir": "/tmp",
+            "format_size_func": lambda size: str(size),
+            "query_task_history_func": lambda *_args: {},
+            "get_download_status_func": lambda: {},
+            "clear_all_tasks_func": lambda scope: calls.setdefault("scope", scope) or 0,
+            "get_recovery_candidates_func": lambda: [],
+            "recover_candidates_func": lambda task_ids: {"ok": True, "submitted": task_ids, "errors": {}},
+            "abort_debug_func": lambda: None,
+            "resolve_download_path_func": lambda *_args, **_kwargs: "/tmp",
+            "clear_task_ids_func": lambda task_ids: {"ok": True, "cleared": len(task_ids), "skipped": 0},
+            "debug_service": Mock(),
+        })
         app.register_blueprint(misc.bp)
 
         response = app.test_client().post("/api/clear_tasks", json={"task_ids": ["a", "b"]})
@@ -2262,19 +2262,19 @@ class TestRoutes:
         from src.routes import misc
 
         app = Flask(__name__)
-        misc.init_blueprint(
-            download_dir="/tmp",
-            format_size_func=lambda size: str(size),
-            query_task_history_func=lambda *_args: {},
-            get_download_status_func=lambda: {},
-            clear_all_tasks_func=lambda _scope: 0,
-            get_recovery_candidates_func=lambda: [],
-            recover_candidates_func=lambda task_ids: {"ok": True, "submitted": task_ids, "errors": {}},
-            abort_debug_func=lambda: None,
-            resolve_download_path_func=lambda *_args, **_kwargs: "/tmp",
-            clear_task_ids_func=lambda task_ids: {"ok": True, "cleared": len(task_ids), "skipped": 0},
-            debug_service=Mock(),
-        )
+        misc.init_blueprint({
+            "download_dir": "/tmp",
+            "format_size_func": lambda size: str(size),
+            "query_task_history_func": lambda *_args: {},
+            "get_download_status_func": lambda: {},
+            "clear_all_tasks_func": lambda _scope: 0,
+            "get_recovery_candidates_func": lambda: [],
+            "recover_candidates_func": lambda task_ids: {"ok": True, "submitted": task_ids, "errors": {}},
+            "abort_debug_func": lambda: None,
+            "resolve_download_path_func": lambda *_args, **_kwargs: "/tmp",
+            "clear_task_ids_func": lambda task_ids: {"ok": True, "cleared": len(task_ids), "skipped": 0},
+            "debug_service": Mock(),
+        })
         app.register_blueprint(misc.bp)
 
         response = app.test_client().post("/api/recover_candidates", json={"task_ids": ["t1"]})
@@ -2286,16 +2286,16 @@ class TestRoutes:
         from flask import Flask
         from src.routes import system
 
-        system.init_blueprint(
-            ensure_tg_conn_func=lambda allow_reconnect=True: None,
-            get_tg_connected_func=lambda: connected,
-            get_tg_error_func=lambda: "",
-            get_tg_user_func=lambda: "user",
-            get_queue_func=lambda: {"active": 0},
-            get_tdl_func=lambda: {"active": 0},
-            proxy_config=None,
-            tdl_binary="/missing/tdl",
-        )
+        system.init_blueprint({
+            "ensure_tg_conn_func": lambda allow_reconnect=True: None,
+            "get_tg_connected_func": lambda: connected,
+            "get_tg_error_func": lambda: "",
+            "get_tg_user_func": lambda: "user",
+            "get_queue_func": lambda: {"active": 0},
+            "get_tdl_func": lambda: {"active": 0},
+            "proxy_config": None,
+            "tdl_binary": "/missing/tdl",
+        })
         app = Flask(__name__)
         app.register_blueprint(system.bp)
         return app.test_client()
@@ -2331,17 +2331,17 @@ class TestRoutes:
                 return str(int(value))
 
         relay.active_relays = 0
-        relay.init_blueprint(
-            relay_token_secret=secret,
-            max_concurrent_relays=2,
-            verify_relay_token_func=verify or (lambda **_kwargs: None),
-            get_relay_media_func=media or (lambda *_args: {"file_name": "v.mp4", "size": 10}),
-            parse_range_func=lambda _range, total: (0, max(0, total - 1), 200),
-            iter_relay_bytes_func=lambda *_args: iter([b"data"]),
-            log_warning_func=lambda *_a, **_k: None,
-            log_info_func=lambda *_a, **_k: None,
-            log_error_func=lambda *_a, **_k: None,
-        )
+        relay.init_blueprint({
+            "relay_token_secret": secret,
+            "max_concurrent_relays": 2,
+            "verify_relay_token_func": verify or (lambda **_kwargs: None),
+            "get_relay_media_func": media or (lambda *_args: {"file_name": "v.mp4", "size": 10}),
+            "parse_range_func": lambda _range, total: (0, max(0, total - 1), 200),
+            "iter_relay_bytes_func": lambda *_args: iter([b"data"]),
+            "log_warning_func": lambda *_a, **_k: None,
+            "log_info_func": lambda *_a, **_k: None,
+            "log_error_func": lambda *_a, **_k: None,
+        })
         app = Flask(__name__)
         app.url_map.converters["signed_int"] = _SignedIntConverter
         app.register_blueprint(relay.bp)

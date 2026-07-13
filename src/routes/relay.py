@@ -25,31 +25,26 @@ relay_lock = threading.RLock()
 active_relays = 0
 
 
-def init_blueprint(
-    relay_token_secret,
-    max_concurrent_relays,
-    verify_relay_token_func,
-    get_relay_media_func,
-    parse_range_func,
-    iter_relay_bytes_func,
-    log_warning_func,
-    log_info_func,
-    log_error_func
-):
-    """初始化 Blueprint 依赖"""
+def init_blueprint(deps):
+    """初始化 Blueprint 依赖（单一 deps 映射注入）。
+
+    keys: relay_token_secret, max_concurrent_relays, verify_relay_token_func,
+          get_relay_media_func, parse_range_func, iter_relay_bytes_func,
+          log_warning_func, log_info_func, log_error_func
+    """
     global _RELAY_TOKEN_SECRET, _MAX_CONCURRENT_RELAYS
     global _verify_relay_token, _get_relay_media, _parse_range
     global _iter_relay_bytes, _log_warning, _log_info, _log_error
 
-    _RELAY_TOKEN_SECRET = relay_token_secret
-    _MAX_CONCURRENT_RELAYS = max_concurrent_relays
-    _verify_relay_token = verify_relay_token_func
-    _get_relay_media = get_relay_media_func
-    _parse_range = parse_range_func
-    _iter_relay_bytes = iter_relay_bytes_func
-    _log_warning = log_warning_func
-    _log_info = log_info_func
-    _log_error = log_error_func
+    _RELAY_TOKEN_SECRET = deps["relay_token_secret"]
+    _MAX_CONCURRENT_RELAYS = deps["max_concurrent_relays"]
+    _verify_relay_token = deps["verify_relay_token_func"]
+    _get_relay_media = deps["get_relay_media_func"]
+    _parse_range = deps["parse_range_func"]
+    _iter_relay_bytes = deps["iter_relay_bytes_func"]
+    _log_warning = deps["log_warning_func"]
+    _log_info = deps["log_info_func"]
+    _log_error = deps["log_error_func"]
 
 
 @bp.route("/relay/<signed_int:entity_id>/<int:msg_id>")
