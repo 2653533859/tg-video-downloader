@@ -48,6 +48,26 @@ class SystemStatusService:
             "tdl": self.get_tdl_status(),
         }
 
+    def liveness_payload(self):
+        """存活探针：进程是否活着（不触碰 Telegram/子进程），始终 200。"""
+        return {"status": "alive"}
+
+    def readiness_payload(self):
+        """就绪探针：能否对外服务。核心信号是主 Telegram 连接是否就绪。
+
+        返回 (payload, http_status)：就绪 200，未就绪 503。tdl 不可用属可降级
+        （telethon 直连仍可下载），不阻断就绪，仅在完整 /api/health 里体现。
+        """
+        telegram_ok = bool(self.get_tg_connected())
+        degraded = [] if telegram_ok else ["telegram"]
+        payload = {
+            "status": "ready" if telegram_ok else "not_ready",
+            "ready": telegram_ok,
+            "telegram_connected": telegram_ok,
+            "degraded": degraded,
+        }
+        return payload, (200 if telegram_ok else 503)
+
     def health_payload(self):
         now = time.time()
         with self._health_cache_lock:
@@ -56,15 +76,24 @@ class SystemStatusService:
             if cached and now - cached_time < self.health_cache_ttl:
                 return cached
 
+        telegram_connected = bool(self.get_tg_connected())
+        tdl_summary = self.tdl_version_summary()
+        degraded = []
+        if not telegram_connected:
+            degraded.append("telegram")
+        if not tdl_summary.get("ok"):
+            degraded.append("tdl")
+
         payload = {
-            "ok": bool(self.get_tg_connected()),
+            "ok": telegram_connected,
+            "degraded": degraded,
             "telegram": {
-                "connected": bool(self.get_tg_connected()),
+                "connected": telegram_connected,
                 "user": self.get_tg_user(),
                 "error": self.get_tg_error(),
             },
             "proxy": self.proxy_status(),
-            "tdl": self.tdl_version_summary(),
+            "tdl": tdl_summary,
             "queue": self.get_queue_status(),
         }
 

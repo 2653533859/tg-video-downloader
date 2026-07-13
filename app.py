@@ -26,6 +26,8 @@ from telethon.tl.types import (
 import logging
 from logging.handlers import RotatingFileHandler
 
+from src.utils.log_filters import RedactionFilter
+
 LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
 os.makedirs(LOG_DIR, exist_ok=True)
 
@@ -34,8 +36,12 @@ logger.setLevel(logging.INFO)
 
 fh = RotatingFileHandler(os.path.join(LOG_DIR, "app.log"), maxBytes=10*1024*1024, backupCount=30, encoding="utf-8")
 fh.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+_redaction_filter = RedactionFilter()
+fh.addFilter(_redaction_filter)
 logger.addHandler(fh)
-logger.addHandler(logging.StreamHandler())
+_stream_handler = logging.StreamHandler()
+_stream_handler.addFilter(_redaction_filter)
+logger.addHandler(_stream_handler)
 
 def log_info(msg): logger.info(msg)
 def log_error(msg): logger.error(msg)

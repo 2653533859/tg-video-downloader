@@ -938,6 +938,63 @@ class TestSystemStatusService:
         assert health["tasks_persisted"] == 2
         assert health["resume_files"] == 1
         assert health["tdl"]["ok"] is False
+        # tdl 不可用 → degraded 含 tdl，但 telegram 已连 → ok 仍 True
+        assert "tdl" in health["degraded"]
+        assert "telegram" not in health["degraded"]
+
+    def test_liveness_and_readiness(self):
+        from src.system import SystemStatusService
+
+        def make(connected):
+            return SystemStatusService(
+                ensure_tg_connection=lambda allow_reconnect=True: None,
+                get_tg_connected=lambda: connected,
+                get_tg_error=lambda: "",
+                get_tg_user=lambda: "user",
+                get_queue_status=lambda: {"active": 0},
+                get_tdl_status=lambda: {"active": 0},
+                proxy_config=None,
+                tdl_binary="/missing/tdl",
+            )
+
+        # liveness 与外部依赖无关，始终 alive
+        assert make(False).liveness_payload() == {"status": "alive"}
+
+        ready_payload, ready_status = make(True).readiness_payload()
+        assert ready_status == 200
+        assert ready_payload["ready"] is True
+        assert ready_payload["degraded"] == []
+
+        notready_payload, notready_status = make(False).readiness_payload()
+        assert notready_status == 503
+        assert notready_payload["ready"] is False
+        assert "telegram" in notready_payload["degraded"]
+
+
+class TestLogRedaction:
+    def test_redacts_sensitive_values(self):
+        from src.utils.log_filters import redact
+
+        assert redact("password=hunter2 done") == "password=*** done"
+        assert redact('WEB_AUTH_PASSWORD: "s3cr3t"') == 'WEB_AUTH_PASSWORD: "***"'
+        assert redact("token=abcdef123456&next") == "token=***&next"
+        assert redact("api_hash=deadbeefcafe") == "api_hash=***"
+        auth = redact("Authorization: Basic dXNlcjpwYXNz")
+        assert auth.startswith("Authorization: ***")
+        assert "dXNlcjpwYXNz" not in auth
+        # 无敏感词不改动
+        assert redact("下载完成 task=-100:42 3MB") == "下载完成 task=-100:42 3MB"
+
+    def test_filter_mutates_record(self):
+        import logging
+        from src.utils.log_filters import RedactionFilter
+
+        record = logging.LogRecord(
+            "x", logging.INFO, __file__, 1, "login password=topsecret", None, None
+        )
+        assert RedactionFilter().filter(record) is True
+        assert "topsecret" not in record.getMessage()
+        assert "***" in record.getMessage()
 
 
 class TestSystemStartup:

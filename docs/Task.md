@@ -91,12 +91,13 @@
 
 ## P2：可观测性、部署与测试
 
-### 9. 让监控和健康检查真正可用
+### 9. 让监控和健康检查真正可用 ✅（2026-07-13 完成）
 
-- [ ] 确认 `/metrics` 现状：metrics.py 未被生产代码引用——要么接入 Prometheus endpoint，要么删除该模块和相关文档。
-- [ ] 为 health endpoint 区分 liveness / readiness / Telegram degraded / tdl degraded。
-- [ ] 统一结构化日志字段（task_id、entity_id、msg_id、downloader、状态、耗时、错误类型），配置日志轮转和敏感字段脱敏。
-- 相关文件：`metrics.py`、`src/system/status.py`、`healthcheck.sh`。
+- [x] `/metrics`/metrics.py **已于 P1-5 随死代码删除**（生产零引用），本项消解，无需再接 Prometheus。
+- [x] health 分层：新增 `/api/health/live`（liveness，进程存活即 200，不触外部依赖）与 `/api/health/ready`（readiness，主 Telegram 未就绪返回 503）；完整 `/api/health` 增加 `degraded` 列表（telegram / tdl 降级标记，tdl 降级不阻断就绪）。
+- [x] 日志加固：轮转此前已有（RotatingFileHandler 10MB×30）；新增**敏感字段脱敏** `RedactionFilter`（src/utils/log_filters.py，脱敏 password/api_hash/token/secret/Basic 头等，挂在 file + stream handler）。结构化字段（task_id/entity_id…）散落各 log 调用点，属大范围文案改写，本轮未逐点改写（价值低、churn 大），保留现状。
+- 验收：新增 3 条测试（liveness/readiness、脱敏正则、Filter 改写记录），pytest 111 passed。
+- 相关文件：`src/system/status.py`、`src/routes/system.py`、`src/utils/log_filters.py`、`app.py`。
 
 ### 10. 完善容器和 CI
 

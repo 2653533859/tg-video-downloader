@@ -55,5 +55,18 @@ def api_status():
 
 @bp.route("/api/health")
 def api_health():
-    """健康检查"""
+    """健康检查（完整信息，含 degraded 列表）"""
     return jsonify(_status_service.health_payload())
+
+
+@bp.route("/api/health/live")
+def api_health_live():
+    """存活探针（liveness）：进程存活即 200，不触碰外部依赖"""
+    return jsonify(_status_service.liveness_payload())
+
+
+@bp.route("/api/health/ready")
+def api_health_ready():
+    """就绪探针（readiness）：主 Telegram 未就绪返回 503"""
+    payload, status = _status_service.readiness_payload()
+    return jsonify(payload), status
