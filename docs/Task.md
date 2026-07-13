@@ -26,8 +26,8 @@
 - [x] 删除含硬编码明文凭据的 4 个孤立文件：`docker_healthcheck.sh`、`docker_healthcheck.py`、`healthcheck.py`、`patch.py`（均已核实无生产引用）；5 个历史文档中的真实凭据已替换为占位符。全仓库扫描无残留。
 - [x] **修复 .dockerignore**：新增排除 `.env`、`*.session`、`*.session-journal`、`.task_state/`、`.sync-backups/` 等——镜像不再打包密钥和 Telegram 会话。
 - [x] 移除 compose 中 `RELAY_TOKEN_SECRET:-change-me` 弱默认（改为空默认=禁用 relay）；实际 `.env` 中的占位密钥已替换为随机 64 位十六进制值。
-- [ ] **人工待办：轮换已泄露的 Web 凭据**——该组用户名/密码曾硬编码在多个文件中，如果现网（如 5003 端口的部署）仍在使用这组凭据，请立即修改 `WEB_AUTH_PASSWORD`。另外当前 `.env` 中 `WEB_AUTH_PASSWORD=admin` 过弱，建议一并改强。
-- [ ] 为 relay token secret 增加最小长度校验（后续批次，改 config.py 校验逻辑）。
+- [x] **凭据轮换（2026-07-13 确认无需处理）**：用户确认现网使用的 Web 账户/密码是自行创建的，不在曾泄露的那组硬编码凭据内，无泄露风险，故不轮换。
+- [x] **relay token secret 最小长度校验 ✅（2026-07-13 完成，方案 A）**：校验落点在 `src/system/startup.py` 的 `validate_runtime_config`（而非原写的 config.py，集中启动校验、不污染 import config 的测试）。新增 `RELAY_SECRET_MIN_LENGTH = 32`，参数 `relay_token_secret=""` 关键字默认形式加入（向后兼容既有调用）；空值放行=禁用 relay，非空且 <32 字符 `raise RuntimeError` fail-closed。`app_new.py` 唯一生效调用点补传 `RELAY_TOKEN_SECRET`，`tests/test_src_modules.py` 补 3 条断言。验收：pytest 97 passed 零回归、py_compile 通过、四分支独立冒烟通过；现网 `.env` 为 64 hex，零影响。
 - 相关文件：`.dockerignore`、`docker-compose.yml`、`.env`、`docs/*.md`。
 
 ### 3. 修复 X-Forwarded-For 认证绕过 ✅（2026-07-12 完成）

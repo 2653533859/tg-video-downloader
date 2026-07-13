@@ -6,11 +6,26 @@ import threading
 from src.security import is_local_bind_only
 
 
-def validate_runtime_config(api_id, api_hash, web_bind_host, web_auth_username, web_auth_password):
+RELAY_SECRET_MIN_LENGTH = 32
+
+
+def validate_runtime_config(
+    api_id,
+    api_hash,
+    web_bind_host,
+    web_auth_username,
+    web_auth_password,
+    relay_token_secret="",
+):
     if not api_id or not api_hash:
         raise RuntimeError("Missing TG_API_ID/TG_API_HASH environment variables")
     if not is_local_bind_only(web_bind_host) and (not web_auth_username or not web_auth_password):
         raise RuntimeError("Non-local binding requires WEB_AUTH_USERNAME and WEB_AUTH_PASSWORD")
+    if relay_token_secret and len(relay_token_secret) < RELAY_SECRET_MIN_LENGTH:
+        raise RuntimeError(
+            f"RELAY_TOKEN_SECRET too short: must be at least "
+            f"{RELAY_SECRET_MIN_LENGTH} characters (leave empty to disable relay)"
+        )
 
 
 def start_runtime_services(

@@ -207,7 +207,14 @@ def start_runtime():
 
 
 def validate_config():
-    validate_runtime_config(API_ID, API_HASH, WEB_BIND_HOST, WEB_AUTH_USERNAME, WEB_AUTH_PASSWORD)
+    validate_runtime_config(
+        API_ID,
+        API_HASH,
+        WEB_BIND_HOST,
+        WEB_AUTH_USERNAME,
+        WEB_AUTH_PASSWORD,
+        relay_token_secret=RELAY_TOKEN_SECRET,
+    )
 
 
 init_all_blueprints()

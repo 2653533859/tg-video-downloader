@@ -898,6 +898,12 @@ class TestSystemStartup:
         with pytest.raises(RuntimeError, match="Non-local binding"):
             validate_runtime_config(123, "hash", "0.0.0.0", "", "")
 
+        # relay token secret 最小长度校验：空放行、足够长放行、非空但过短抛错
+        validate_runtime_config(123, "hash", "127.0.0.1", "", "", relay_token_secret="")
+        validate_runtime_config(123, "hash", "127.0.0.1", "", "", relay_token_secret="a" * 64)
+        with pytest.raises(RuntimeError, match="RELAY_TOKEN_SECRET too short"):
+            validate_runtime_config(123, "hash", "127.0.0.1", "", "", relay_token_secret="abc")
+
     def test_start_runtime_services_orchestrates_background_work(self):
         from src.system import start_runtime_services
 

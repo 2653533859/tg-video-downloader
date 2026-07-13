@@ -2,7 +2,7 @@
 
 基于 Flask + Telethon 的 Telegram 视频下载 Web 应用：浏览频道/群组、队列下载、断点续传、在线播放，内置下载看门狗和连接健康监控。
 
-> 架构与开发文档见 `CLAUDE.md`（2026-07-13 更新，与代码同步）；优化任务清单见 `Task.md`。
+> 架构与开发文档见 `CLAUDE.md`（2026-07-13 更新，与代码同步）；优化任务清单见 `docs/Task.md`。
 
 ## 功能
 
@@ -58,9 +58,8 @@ tg-downloader-optimized/
 ├── src/                # 模块化代码（routes/download/telegram/state/files/security/...）
 ├── templates/ static/  # 前端
 ├── tests/              # pytest 测试套件
-├── docs/               # FRONTEND_GUIDE.md / WEBSOCKET_GUIDE.md
-├── Dockerfile / docker-compose.yml / healthcheck.sh
-└── Task.md             # 优化任务清单（进行中）
+├── docs/               # 文档（含 Task.md 任务清单、CHANGELOG.md、前端/WS 指南）
+└── Dockerfile / docker-compose.yml / healthcheck.sh
 ```
 
 ## 配置

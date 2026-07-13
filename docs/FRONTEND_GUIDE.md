@@ -276,33 +276,6 @@ Safari: Cmd+Option+I
 
 ---
 
-## 🚀 未来功能（WebSocket 版本）
-
-按照 `docs/WEBSOCKET_GUIDE.md` 实施后：
-
-### 实时推送
-- ✅ 下载进度实时推送（<100ms 延迟）
-- ✅ 无需轮询，减少 98% 请求
-- ✅ 断线自动重连
-- ✅ 多客户端同步
-
-### 使用方式
-```javascript
-// 连接 WebSocket
-const ws = new WebSocketClient();
-ws.connect();
-
-// 订阅任务
-ws.subscribeTask(taskId);
-
-// 接收实时更新
-ws.onProgress = (data) => {
-    console.log(`进度: ${data.progress}%`);
-};
-```
-
----
-
 ## 📝 技术栈
 
 - **HTML5** - 语义化标签
@@ -316,8 +289,6 @@ ws.onProgress = (data) => {
 ## 📄 相关文档
 
 - `CLAUDE.md` - 后端架构文档
-- `docs/WEBSOCKET_GUIDE.md` - WebSocket 实时推送方案
-- `docs/ASYNC_REFACTORING_GUIDE.md` - 异步架构重构方案
 
 ---
 

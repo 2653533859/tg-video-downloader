@@ -47,7 +47,7 @@ src/
 - Flask `threaded=True` + 两个独立 asyncio 事件循环线程：主 Telegram 客户端（tg_loop）与 relay 客户端（relay_loop，StringSession 避免 session 文件锁冲突）
 - **禁止**在 Flask 请求处理器中 `loop.run_until_complete()`；必须用 `run_async()` / `relay_run_async()`（app.py:872/879，底层是 `TelegramRuntime.run_async`，asyncio.run_coroutine_threadsafe + 超时）
 - 下载并发：`MAX_CONCURRENT_DOWNLOADS = 1`（app.py:473，受 tdl 单实例 Bolt DB 约束）；relay 并发：`MAX_CONCURRENT_RELAYS = 2`
-- 后台线程（全部 daemon，暂无优雅退出——见 Task.md P1-6）：队列 worker、DownloadWatchdog、TelegramHealthChecker（app.py:213 在主客户端连接后初始化）、缩略图清理、任务库备份
+- 后台线程（全部 daemon，暂无优雅退出——见 docs/Task.md P1-6）：队列 worker、DownloadWatchdog、TelegramHealthChecker（app.py:213 在主客户端连接后初始化）、缩略图清理、任务库备份
 
 ## 任务状态机
 
@@ -109,5 +109,5 @@ sqlite3 .task_state/tasks.sqlite3 "SELECT task_id, json_extract(state_json,'$.st
 - **调 Telegram API**：包在 `run_async()` 里；连接问题依赖 `TelegramRuntime.ensure_connection` 自动重连（8s 冷却窗口）
 - **改下载逻辑**：注意 DownloadWatchdog 会重启无进度任务（默认 5 分钟阈值）；确保进度回调正常更新
 - **文件路径处理**：一律经 `src/files/service.py` 的 `resolve_file_path`（realpath + commonpath 防目录遍历）
-- **已知待办**：见 `Task.md`（P1-5b 摘除 app.py 死路由、P1-6 调度器重构、P1-7 运行时阻塞、P1-8 持久化优化等）
+- **已知待办**：见 `docs/Task.md`（P1-5b 摘除 app.py 死路由、P1-6 调度器重构、P1-7 运行时阻塞、P1-8 持久化优化等）
 - 修改后运行：`PYTHONPATH=. python3 -m pytest -q`（当前基线：全绿）
