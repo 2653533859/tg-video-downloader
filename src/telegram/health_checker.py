@@ -5,6 +5,7 @@ Telegram 健康检查器
 import threading
 import logging
 import asyncio
+import contextlib
 from typing import Optional, Callable
 
 logger = logging.getLogger("tg_downloader.health_checker")
@@ -26,6 +27,7 @@ class TelegramHealthChecker:
         log_info: Optional[Callable[[str], None]] = None,
         log_warning: Optional[Callable[[str], None]] = None,
         log_error: Optional[Callable[[str], None]] = None,
+        reconnect_lock=None,
     ):
         """
         初始化健康检查器
@@ -36,12 +38,15 @@ class TelegramHealthChecker:
             check_interval: 检查间隔（秒）
             max_retry: 最大重试次数
             on_reconnect_callback: 重连成功后的回调函数
+            reconnect_lock: 与 TelegramRuntime 共享的 client 重连锁，避免两处
+                对同一 client 并发 connect/disconnect 交错。None 时不协调。
         """
         self.client = client
         self.loop = loop
         self.check_interval = check_interval
         self.max_retry = max_retry
         self.on_reconnect_callback = on_reconnect_callback
+        self._reconnect_lock = reconnect_lock
         self._log_info = log_info or logger.info
         self._log_warning = log_warning or logger.warning
         self._log_error = log_error or logger.error
@@ -141,11 +146,15 @@ class TelegramHealthChecker:
     def _attempt_reconnect(self):
         """尝试重新连接"""
         try:
-            future = asyncio.run_coroutine_threadsafe(
-                self._async_reconnect(),
-                self.loop
-            )
-            future.result(timeout=30)
+            # 与 TelegramRuntime 的后台重连共享 client 锁，串行化对同一 client 的
+            # connect/disconnect，避免并发交错导致连接抖动。
+            lock = self._reconnect_lock or contextlib.nullcontext()
+            with lock:
+                future = asyncio.run_coroutine_threadsafe(
+                    self._async_reconnect(),
+                    self.loop
+                )
+                future.result(timeout=30)
             if self.on_reconnect_callback:
                 try:
                     self.on_reconnect_callback()

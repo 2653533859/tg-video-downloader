@@ -162,6 +162,35 @@ class TestTaskStatePersistence:
             assert hist[0] == 1
             store.close()
 
+    def test_throttle_only_applies_to_downloading(self):
+        from src.state.persistence import TaskStatePersistence
+
+        with tempfile.TemporaryDirectory() as state_dir:
+            store = TaskStatePersistence(
+                state_dir=state_dir,
+                terminal_states={"done", "error", "cancelled"},
+                persist_throttle_seconds=60,
+            )
+            # queued 属非高频状态：同状态的字段变化不应被节流，必须落库最新值
+            store.persist_state("t1", {"status": "queued", "queue_position": 1})
+            store.persist_state("t1", {"status": "queued", "queue_position": 5})
+            with store.connect() as conn:
+                row = conn.execute("SELECT state_json FROM task_states WHERE task_id='t1'").fetchone()
+            assert '"queue_position": 5' in row[0]
+            store.close()
+
+    def test_closed_persistence_is_noop_and_does_not_reopen(self):
+        from src.state.persistence import TaskStatePersistence
+
+        with tempfile.TemporaryDirectory() as state_dir:
+            store = TaskStatePersistence(state_dir=state_dir, terminal_states={"done"})
+            store.persist_state("t1", {"status": "done", "finish_time": 1})
+            store.close()
+            # 关闭后：迟到写入静默 no-op，且不得重开连接（防泄漏）
+            store.persist_state("t2", {"status": "done", "finish_time": 2})
+            assert store._conn is None
+            assert store.backup_database() is None
+
     def test_schema_version_and_backup_integrity(self):
         from src.state.persistence import TaskStatePersistence, SCHEMA_VERSION
 
@@ -1081,6 +1110,11 @@ class TestLogRedaction:
         assert "dXNlcjpwYXNz" not in auth
         # 无敏感词不改动
         assert redact("下载完成 task=-100:42 3MB") == "下载完成 task=-100:42 3MB"
+        # 良性字段（敏感词仅作前缀、紧邻的是别的词）不得被误伤
+        assert redact("token_ttl=1800 next") == "token_ttl=1800 next"
+        assert redact("authorization_status=ok reply_count=3") == "authorization_status=ok reply_count=3"
+        # RELAY_TOKEN_SECRET 这类以敏感词结尾的 env 键仍被脱敏
+        assert redact("RELAY_TOKEN_SECRET=deadbeef") == "RELAY_TOKEN_SECRET=***"
 
     def test_filter_mutates_record(self):
         import logging
@@ -1866,6 +1900,7 @@ class TestTelegramRuntime:
         loop = Mock()
         loop.is_running.return_value = True
         runtime = TelegramRuntime(client=client, loop=loop)
+        runtime.reconnect_grace_seconds = 0  # 关闭宽限等待，保持测试快速
 
         started = []
 
@@ -1887,6 +1922,41 @@ class TestTelegramRuntime:
         # 冷却窗口内 / 已有重连进行中：不重复排布线程
         assert runtime.ensure_connection() is False
         assert len(started) == 1
+
+    def test_start_reconnect_failure_rolls_back_in_progress(self):
+        from src.telegram.runtime import TelegramRuntime
+
+        client = Mock()
+        client.is_connected.return_value = False
+        loop = Mock()
+        loop.is_running.return_value = True
+        runtime = TelegramRuntime(client=client, loop=loop)
+        runtime.reconnect_grace_seconds = 0
+
+        def _boom_factory(*_args, **_kwargs):
+            raise RuntimeError("cannot start thread")
+
+        runtime._reconnect_thread_factory = _boom_factory
+        # 线程启动失败：不得永久卡在“重连中”，in_progress 必须回滚
+        assert runtime.ensure_connection() is False
+        assert runtime.reconnect_in_progress is False
+
+    def test_ensure_connection_grace_returns_true_on_quick_reconnect(self):
+        from src.telegram.runtime import TelegramRuntime
+
+        client = Mock()
+        # 首次断开触发重连；宽限窗口内 is_connected 变 True → 本次请求即返回成功
+        client.is_connected.side_effect = [False, False, True]
+        loop = Mock()
+        loop.is_running.return_value = True
+        runtime = TelegramRuntime(client=client, loop=loop)
+        runtime.reconnect_grace_seconds = 1.0
+        runtime._reconnect_thread_factory = lambda *a, **k: type(
+            "T", (), {"start": lambda self: None}
+        )()
+
+        assert runtime.ensure_connection() is True
+        assert runtime.connected is True
 
     def test_reconnect_cooldown_exponential_backoff(self):
         from src.telegram.runtime import TelegramRuntime

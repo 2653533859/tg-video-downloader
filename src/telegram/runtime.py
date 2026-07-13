@@ -29,13 +29,15 @@ class TelegramRuntime:
         self.connected = False
         self.connect_error = ""
         self.user_info = ""
-        self.reconnect_lock = threading.Lock()
+        self.reconnect_lock = threading.Lock()          # 保护重连状态标志（快，不长持）
+        self.client_reconnect_lock = threading.Lock()   # 串行化对 client 的真实 connect/disconnect
         self.last_reconnect_attempt = 0.0
         self.reconnect_in_progress = False
         self.reconnect_failures = 0
         self.reconnect_backoff_base = 8      # 基础冷却秒数
         self.reconnect_backoff_max = 120     # 冷却上限秒数
         self.reconnect_timeout = 45          # 后台重连单次超时
+        self.reconnect_grace_seconds = 2.0   # 快速瞬断在本次请求内的宽限（远小于旧 45s 阻塞）
         self._reconnect_thread_factory = threading.Thread
 
         self.cache_lock = threading.RLock()
@@ -91,7 +93,20 @@ class TelegramRuntime:
 
         # 后台重连 + 快速失败：绝不在请求线程内同步等待重连完成（原实现会在
         # reconnect_lock 内 .result(timeout=45) 阻塞 Flask 请求线程最长 45s）。
-        self._maybe_start_reconnect()
+        started = self._maybe_start_reconnect()
+
+        # 仅当本次刚发起了一次新的重连时，给快速瞬断一个在本请求内恢复的短暂宽限；
+        # 上限 reconnect_grace_seconds（默认 2s，远小于旧 45s）。持续断连时后续
+        # 请求处于冷却期 started=False，不再等待，快速失败。
+        if started and self.reconnect_grace_seconds > 0:
+            deadline = time.time() + self.reconnect_grace_seconds
+            while time.time() < deadline:
+                if self.client.is_connected():
+                    self.connected = True
+                    self.connect_error = ""
+                    self.reconnect_failures = 0
+                    return True
+                time.sleep(0.1)
         return False
 
     def _reconnect_cooldown(self):
@@ -100,19 +115,27 @@ class TelegramRuntime:
         return min(window, self.reconnect_backoff_max)
 
     def _maybe_start_reconnect(self):
+        """尝试发起一次后台重连。返回 True 表示本次确实启动了新的重连线程。"""
         now = time.time()
         with self.reconnect_lock:
             if self.reconnect_in_progress:
                 self.connect_error = self.connect_error or "Telegram 重连中，请稍后重试..."
-                return
+                return False
             if now - self.last_reconnect_attempt < self._reconnect_cooldown():
                 self.connect_error = self.connect_error or "Telegram 重连中，请稍后重试..."
-                return
+                return False
             self.last_reconnect_attempt = now
             self.reconnect_in_progress = True
             self.connect_error = "Telegram 已断开，正在重连..."
 
-        self._reconnect_thread_factory(target=self._run_reconnect, daemon=True).start()
+        try:
+            self._reconnect_thread_factory(target=self._run_reconnect, daemon=True).start()
+            return True
+        except Exception:
+            # 线程启动失败：回滚 in_progress，否则会永久卡在“重连中”而再不发起重连
+            with self.reconnect_lock:
+                self.reconnect_in_progress = False
+            return False
 
     def _run_reconnect(self):
         try:
@@ -123,10 +146,13 @@ class TelegramRuntime:
                 user = await self.client.get_me()
                 return self.format_user_display(user)
 
-            user_info = asyncio.run_coroutine_threadsafe(
-                _reconnect(),
-                self.loop,
-            ).result(timeout=self.reconnect_timeout)
+            # 与 health checker 的重连共享同一把 client 锁，避免 connect/disconnect
+            # 在同一 client 上并发交错导致连接抖动。
+            with self.client_reconnect_lock:
+                user_info = asyncio.run_coroutine_threadsafe(
+                    _reconnect(),
+                    self.loop,
+                ).result(timeout=self.reconnect_timeout)
             self.user_info = user_info
             self.connected = True
             self.connect_error = ""

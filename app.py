@@ -245,6 +245,7 @@ def init_tg_health_checker():
             log_info=log_info,
             log_warning=log_warning,
             log_error=log_error,
+            reconnect_lock=tg_runtime.client_reconnect_lock,
         )
         tg_health_checker.start()
 

@@ -10,12 +10,13 @@ import re
 
 
 # (?i) 忽略大小写。顺序敏感：Basic/Bearer 头先脱敏，再处理 key=value。
-# key 用 \w* 前后缀以覆盖 env 变量式命名（WEB_AUTH_PASSWORD / TG_API_HASH /
-# RELAY_TOKEN_SECRET 等）。每条把「键+分隔符（含可选引号）」留 group(1)，值替换为 ***。
+# 键用 \w* 前缀覆盖 env 变量式命名（WEB_AUTH_PASSWORD / TG_API_HASH /
+# RELAY_TOKEN_SECRET 等），但敏感词必须紧邻分隔符（无 \w* 后缀），以免误伤
+# token_ttl / authorization_status 这类以敏感词为前缀的良性字段。
 _SENSITIVE_PATTERNS = [
     re.compile(r"(?i)(\b(?:basic|bearer)\s+)([A-Za-z0-9+/=._-]{8,})"),
     re.compile(
-        r"(?i)(\w*(?:password|passwd|pwd|api_?hash|secret|token|authorization)\w*\s*[=:]\s*[\"']?)"
+        r"(?i)(\w*(?:password|passwd|pwd|api_?hash|secret|token|authorization)\s*[=:]\s*[\"']?)"
         r"([^\s,&\"';]+)"
     ),
 ]

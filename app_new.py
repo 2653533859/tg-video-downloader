@@ -169,9 +169,14 @@ def register_all_blueprints():
     app.register_blueprint(relay_bp)
 
 
+# 编排器存活/就绪探针豁免 Basic Auth：kubelet/Docker HTTP 探针通常不带凭据，
+# 且这两个端点只暴露布尔状态（不含 user/proxy/tdl 版本等细节，那些仍在 /api/health）。
+_AUTH_EXEMPT_PATHS = ("/api/health/live", "/api/health/ready")
+
+
 @app.before_request
 def enforce_access_control():
-    if request.path.startswith("/relay/"):
+    if request.path.startswith("/relay/") or request.path in _AUTH_EXEMPT_PATHS:
         return None
     return require_web_auth(
         request,

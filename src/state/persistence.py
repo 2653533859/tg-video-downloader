@@ -35,8 +35,11 @@ class TaskStatePersistence:
         self._enabled = enabled
         self.persist_throttle_seconds = persist_throttle_seconds
         self._conn = None
-        # task_id -> (last_write_ts, last_status)，用于同状态进度更新的写入节流
+        self._closed = False
+        # task_id -> (last_write_ts, last_status)，用于同状态进度更新的写入节流。
+        # 容量上限防止长期运行下未 delete_state 的完成任务无限累积（内存）。
         self._last_persist: Dict[str, Tuple[float, str]] = {}
+        self._last_persist_cap = 2000
         os.makedirs(self.state_dir, exist_ok=True)
 
     def legacy_state_file(self, task_id):
@@ -85,6 +88,9 @@ class TaskStatePersistence:
         # 复用单个连接：check_same_thread=False + self.lock（RLock）串行化保证跨线程安全；
         # schema 只在首次建连时初始化一次，避免每次操作重复 CREATE TABLE + PRAGMA。
         with self.lock:
+            if self._closed:
+                # close() 之后拒绝复活连接：停机阶段的迟到写入不得重开已关闭的连接。
+                raise RuntimeError("TaskStatePersistence is closed")
             if self._conn is None:
                 conn = sqlite3.connect(self.db_path, timeout=10, check_same_thread=False)
                 self._init_schema(conn)
@@ -93,6 +99,7 @@ class TaskStatePersistence:
 
     def close(self):
         with self.lock:
+            self._closed = True
             if self._conn is not None:
                 try:
                     self._conn.close()
@@ -117,7 +124,7 @@ class TaskStatePersistence:
                 self.warning_logger(f"[{task_id}] 迁移旧任务状态失败: {exc}")
 
     def persist_state(self, task_id, state):
-        if not task_id or not self.enabled():
+        if not task_id or not self.enabled() or self._closed:
             return
         payload = dict(state or {})
         status = payload.get("status")
@@ -126,8 +133,11 @@ class TaskStatePersistence:
         now = time.time()
         try:
             with self.lock:
-                # 节流：同状态的高频进度更新在窗口内跳过落库（终态与状态切换始终写）
-                if not is_terminal:
+                if self._closed:
+                    return
+                # 节流仅作用于 downloading（真正高频的进度更新）；其它非终态
+                # （queued/paused 等）的字段变化始终落库，避免被误丢。终态始终写。
+                if status == "downloading" and not is_terminal:
                     last = self._last_persist.get(key)
                     if last and last[1] == status and (now - last[0]) < self.persist_throttle_seconds:
                         return
@@ -143,6 +153,9 @@ class TaskStatePersistence:
                             (key, state_json, now, payload.get("finish_time") or now),
                         )
                 self._last_persist[key] = (now, status)
+                # 容量上限：超限时按插入序淘汰最旧条目，防止无界增长
+                if len(self._last_persist) > self._last_persist_cap:
+                    self._last_persist.pop(next(iter(self._last_persist)), None)
         except Exception as exc:
             self.warning_logger(f"[{task_id}] 持久化任务状态失败: {exc}")
 
@@ -194,7 +207,7 @@ class TaskStatePersistence:
             return 0
 
     def backup_database(self):
-        if not self.enabled():
+        if not self.enabled() or self._closed:
             return None
         os.makedirs(self.backup_dir, exist_ok=True)
         stamp = datetime.now().strftime("%Y%m%d")
