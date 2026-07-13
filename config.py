@@ -1,4 +1,6 @@
+import hashlib
 import os
+import secrets
 
 
 def _strtobool(value, default=False):
@@ -66,6 +68,25 @@ OPEN_FOLDER_ENABLED = _strtobool(os.getenv("OPEN_FOLDER_ENABLED"), default=False
 # 仅当部署在可信反向代理之后时才开启：开启后 X-Forwarded-For 会参与
 # "本地请求"判定；默认关闭，防止伪造该头绕过 Basic Auth。
 TRUST_FORWARDED_FOR = _strtobool(os.getenv("TRUST_FORWARDED_FOR"), default=False)
+
+
+def _resolve_web_session_secret():
+    """Flask cookie 会话签名密钥。取值优先级：
+    1. 显式 WEB_SESSION_SECRET（最优，可跨实例共享）。
+    2. 由 WEB_AUTH_USERNAME+PASSWORD 经 sha256 派生——稳定、重启后旧会话不失效、
+       零额外配置；凭据变更时旧会话自然失效（正是期望行为）。
+    3. 兜底进程内随机——重启即失效，仅适合本地开发（此时通常也无需登录页）。
+    """
+    explicit = os.getenv("WEB_SESSION_SECRET", "").strip()
+    if explicit:
+        return explicit
+    if WEB_AUTH_USERNAME and WEB_AUTH_PASSWORD:
+        material = f"session:{WEB_AUTH_USERNAME}:{WEB_AUTH_PASSWORD}".encode("utf-8")
+        return hashlib.sha256(material).hexdigest()
+    return secrets.token_hex(32)
+
+
+WEB_SESSION_SECRET = _resolve_web_session_secret()
 
 # Relay 配置
 RELAY_TOKEN_SECRET = os.getenv("RELAY_TOKEN_SECRET", "").strip()

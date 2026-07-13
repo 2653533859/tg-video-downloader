@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>登录 · TG 视频下载器</title>
+  <link rel="icon"
+    href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🚀</text></svg>">
+  <link rel="stylesheet" href="/static/css/style.css">
+  <style>
+    .login-wrap {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .login-card {
+      width: 100%;
+      max-width: 360px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 32px 28px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    }
+    .login-card h1 {
+      font-size: 20px;
+      margin: 0 0 4px;
+      color: var(--accent);
+    }
+    .login-card .sub {
+      font-size: 13px;
+      color: #888;
+      margin-bottom: 24px;
+    }
+    .login-field {
+      margin-bottom: 16px;
+    }
+    .login-field label {
+      display: block;
+      font-size: 13px;
+      color: #aaa;
+      margin-bottom: 6px;
+    }
+    .login-field input {
+      width: 100%;
+      box-sizing: border-box;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 6px;
+      padding: 10px 12px;
+      font-size: 14px;
+    }
+    .login-field input:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+    .login-btn {
+      width: 100%;
+      background: var(--accent2);
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 11px;
+      font-size: 14px;
+      cursor: pointer;
+      margin-top: 4px;
+    }
+    .login-btn:hover {
+      background: var(--accent);
+    }
+    .login-btn:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+    .login-error {
+      color: #ff6b6b;
+      font-size: 13px;
+      min-height: 18px;
+      margin-top: 12px;
+      text-align: center;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="login-wrap">
+    <form class="login-card" id="loginForm" onsubmit="return doLogin(event)">
+      <h1>🚀 TG 视频下载器</h1>
+      <div class="sub">请登录以继续</div>
+      <div class="login-field">
+        <label for="username">用户名</label>
+        <input id="username" name="username" autocomplete="username" autofocus>
+      </div>
+      <div class="login-field">
+        <label for="password">密码</label>
+        <input id="password" name="password" type="password" autocomplete="current-password">
+      </div>
+      <button class="login-btn" id="loginBtn" type="submit">登录</button>
+      <div class="login-error" id="loginError"></div>
+    </form>
+  </div>
+
+  <script>
+    async function doLogin(evt) {
+      evt.preventDefault();
+      const btn = document.getElementById('loginBtn');
+      const errEl = document.getElementById('loginError');
+      errEl.textContent = '';
+      btn.disabled = true;
+      btn.textContent = '登录中...';
+      try {
+        const resp = await fetch('/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            username: document.getElementById('username').value,
+            password: document.getElementById('password').value,
+          }),
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (resp.ok && data.ok) {
+          window.location = '/';
+          return false;
+        }
+        errEl.textContent = data.error || '登录失败';
+      } catch (e) {
+        errEl.textContent = '网络错误，请重试';
+      }
+      btn.disabled = false;
+      btn.textContent = '登录';
+      return false;
+    }
+  </script>
+</body>
+
+</html>

@@ -14,6 +14,7 @@
   <div class="header">
     <h1>TG 视频下载器 · TDL 版</h1>
     <div class="conn-status conn-loading" id="connStatus"><span class="dot"></span> 连接中...</div>
+    <button class="btn btn-sm btn-outline" id="logoutBtn" style="display:none" onclick="doLogout()">登出</button>
     <div class="search-box">
       <input id="searchInput" placeholder="频道链接或 @用户名" onkeydown="if(event.key==='Enter')doSearch()">
       <button onclick="doSearch()">搜索</button>

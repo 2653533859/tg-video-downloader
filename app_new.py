@@ -6,8 +6,9 @@ registering the split route modules against the real runtime functions.
 """
 
 import time
+from datetime import timedelta
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, redirect, request, session
 from werkzeug.routing import BaseConverter
 
 import app as runtime
@@ -17,6 +18,7 @@ from config import (
     DOWNLOAD_DIR,
     OPEN_FOLDER_ENABLED,
     PROXY_CONFIG,
+    PUBLIC_BASE_URL,
     RELAY_TOKEN_SECRET,
     TDL_BINARY,
     TRUST_FORWARDED_FOR,
@@ -24,11 +26,14 @@ from config import (
     WEB_AUTH_USERNAME,
     WEB_BIND_HOST,
     WEB_BIND_PORT,
+    WEB_SESSION_SECRET,
 )
 from relay_tokens import verify_relay_token
 from src.security import require_web_auth
 from src.system import start_runtime_services, validate_runtime_config
 from src.routes import (
+    auth,
+    auth_bp,
     download,
     download_bp,
     files,
@@ -57,12 +62,28 @@ class SignedIntConverter(BaseConverter):
 app = Flask(__name__)
 app.url_map.converters["signed_int"] = SignedIntConverter
 
+# cookie 会话（网页登录）配置：签名密钥来自 config（显式 > 派生 > 随机）。
+app.secret_key = WEB_SESSION_SECRET
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    PERMANENT_SESSION_LIFETIME=timedelta(days=7),
+    # 仅当对外地址是 https 时才要求 Secure，否则纯 http 部署下 cookie 会被浏览器丢弃。
+    SESSION_COOKIE_SECURE=PUBLIC_BASE_URL.lower().startswith("https://"),
+)
+
 
 def _runtime_attr(name):
     return getattr(runtime, name)
 
 
 def init_all_blueprints():
+    auth.init_blueprint({
+        "auth_username": WEB_AUTH_USERNAME,
+        "auth_password": WEB_AUTH_PASSWORD,
+        "trust_forwarded": TRUST_FORWARDED_FOR,
+    })
+
     files.init_blueprint({
         "resolve_path_func": runtime.resolve_current_download_path,
         "is_local_func": runtime.current_request_is_local,
@@ -161,6 +182,7 @@ def init_all_blueprints():
 
 
 def register_all_blueprints():
+    app.register_blueprint(auth_bp)
     app.register_blueprint(system_bp)
     app.register_blueprint(files_bp)
     app.register_blueprint(telegram_bp)
@@ -171,20 +193,49 @@ def register_all_blueprints():
 
 # 编排器存活/就绪探针豁免 Basic Auth：kubelet/Docker HTTP 探针通常不带凭据，
 # 且这两个端点只暴露布尔状态（不含 user/proxy/tdl 版本等细节，那些仍在 /api/health）。
-_AUTH_EXEMPT_PATHS = ("/api/health/live", "/api/health/ready")
+# 登录页与登录/登出/鉴权状态 API 也必须豁免，否则无法登录（先有鸡才有蛋）。
+_AUTH_EXEMPT_PATHS = (
+    "/api/health/live",
+    "/api/health/ready",
+    "/login",
+    "/api/login",
+    "/api/logout",
+    "/api/auth/status",
+)
+
+
+def _wants_html():
+    return "text/html" in (request.headers.get("Accept") or "")
 
 
 @app.before_request
 def enforce_access_control():
-    if request.path.startswith("/relay/") or request.path in _AUTH_EXEMPT_PATHS:
+    path = request.path
+    # 1) 豁免路径（含静态资源、relay token 保护端点、登录相关、探针）→ 放行
+    if (
+        path.startswith("/relay/")
+        or path.startswith("/static/")
+        or path in _AUTH_EXEMPT_PATHS
+    ):
         return None
-    return require_web_auth(
+    # 2) 会话已登录 → 放行
+    if session.get("authed"):
+        return None
+    # 3) 回退 Basic Auth（本地请求在其内部判定为放行，保持 healthcheck/API 兼容）
+    result = require_web_auth(
         request,
         WEB_BIND_HOST,
         WEB_AUTH_USERNAME,
         WEB_AUTH_PASSWORD,
         trust_forwarded=TRUST_FORWARDED_FOR,
     )
+    if result is None:
+        return None
+    # 4) Basic 不通过：浏览器页面访问 → 跳登录页；API/XHR → 沿用原 401/403。
+    #    仅在已配置凭据时才跳登录页（否则登录也无从校验，保持 fail-closed 语义）。
+    if _wants_html() and WEB_AUTH_USERNAME and WEB_AUTH_PASSWORD:
+        return redirect("/login")
+    return result
 
 
 @app.route("/api/settings/proxy", methods=["GET"])

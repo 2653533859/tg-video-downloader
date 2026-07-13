@@ -175,6 +175,22 @@ let currentEntity = null;
     checkStatus();
     statusTimer = setInterval(checkStatus, 5000);
     refreshHealth();
+
+    // 登出入口：仅在启用了鉴权且当前非本地会话登录时显示
+    function refreshAuthUi() {
+      fetch('/api/auth/status').then(r => r.json()).then(data => {
+        const btn = document.getElementById('logoutBtn');
+        if (btn) btn.style.display = (data.auth_required && !data.local) ? '' : 'none';
+      }).catch(() => {});
+    }
+    function doLogout() {
+      fetch('/api/logout', { method: 'POST' })
+        .then(() => { window.location = '/login'; })
+        .catch(() => { window.location = '/login'; });
+    }
+    window.doLogout = doLogout;
+    refreshAuthUi();
+
     restoreDownloadTasks();
     syncMobileLayout();
     initDownloadsResizer();

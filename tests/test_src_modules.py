@@ -1034,6 +1034,163 @@ class TestAccessControl:
             assert require_web_auth(request, "0.0.0.0", "u", "p") is None
 
 
+class TestWebSessionAuth:
+    """网页会话登录（auth_bp）：登录/失败/登出/鉴权状态。"""
+
+    def _make_app(self, username="u", password="p", trust_forwarded=False):
+        import os
+        from flask import Flask
+        from src.routes import auth
+
+        auth.init_blueprint({
+            "auth_username": username,
+            "auth_password": password,
+            "trust_forwarded": trust_forwarded,
+        })
+        templates = os.path.join(os.path.dirname(__file__), "..", "templates")
+        app = Flask(__name__, template_folder=templates)
+        app.secret_key = "test-secret"
+        app.register_blueprint(auth.bp)
+        return app
+
+    def test_login_success_sets_session(self):
+        app = self._make_app("u", "p")
+        client = app.test_client()
+        resp = client.post(
+            "/api/login",
+            json={"username": "u", "password": "p"},
+            environ_base={"REMOTE_ADDR": "10.0.0.1"},
+        )
+        assert resp.status_code == 200
+        assert resp.get_json()["ok"] is True
+        with client.session_transaction() as sess:
+            assert sess.get("authed") is True
+
+    def test_login_failure_returns_401(self):
+        app = self._make_app("u", "p")
+        client = app.test_client()
+        resp = client.post(
+            "/api/login",
+            json={"username": "u", "password": "WRONG"},
+            environ_base={"REMOTE_ADDR": "10.0.0.1"},
+        )
+        assert resp.status_code == 401
+        assert resp.get_json()["ok"] is False
+        with client.session_transaction() as sess:
+            assert sess.get("authed") is None
+
+    def test_logout_clears_session(self):
+        app = self._make_app("u", "p")
+        client = app.test_client()
+        client.post(
+            "/api/login",
+            json={"username": "u", "password": "p"},
+            environ_base={"REMOTE_ADDR": "10.0.0.1"},
+        )
+        resp = client.post("/api/logout", environ_base={"REMOTE_ADDR": "10.0.0.1"})
+        assert resp.status_code == 200
+        with client.session_transaction() as sess:
+            assert sess.get("authed") is None
+
+    def test_auth_status_non_local_requires_login(self):
+        app = self._make_app("u", "p")
+        client = app.test_client()
+        resp = client.get("/api/auth/status", environ_base={"REMOTE_ADDR": "10.0.0.1"})
+        data = resp.get_json()
+        assert data["auth_required"] is True
+        assert data["local"] is False
+        assert data["authed"] is False
+
+    def test_auth_status_local_is_authed(self):
+        app = self._make_app("u", "p")
+        client = app.test_client()
+        resp = client.get("/api/auth/status", environ_base={"REMOTE_ADDR": "127.0.0.1"})
+        data = resp.get_json()
+        assert data["local"] is True
+        assert data["authed"] is True
+
+    def test_auth_status_no_credentials_means_no_auth_required(self):
+        app = self._make_app("", "")
+        client = app.test_client()
+        resp = client.get("/api/auth/status", environ_base={"REMOTE_ADDR": "10.0.0.1"})
+        data = resp.get_json()
+        assert data["auth_required"] is False
+        assert data["authed"] is True
+
+    def test_login_page_redirects_when_local(self):
+        app = self._make_app("u", "p")
+        client = app.test_client()
+        resp = client.get("/login", environ_base={"REMOTE_ADDR": "127.0.0.1"})
+        assert resp.status_code == 302
+        assert resp.headers["Location"].endswith("/")
+
+    def test_login_page_renders_when_unauthed(self):
+        app = self._make_app("u", "p")
+        client = app.test_client()
+        resp = client.get("/login", environ_base={"REMOTE_ADDR": "10.0.0.1"})
+        assert resp.status_code == 200
+        assert b"password" in resp.data
+
+
+class TestEnforceAccessControl:
+    """app_new.enforce_access_control 四路放行（本地/会话/Basic/未认证）。"""
+
+    def _client(self, monkeypatch, username="u", password="p"):
+        import app_new
+
+        monkeypatch.setattr(app_new, "WEB_AUTH_USERNAME", username)
+        monkeypatch.setattr(app_new, "WEB_AUTH_PASSWORD", password)
+        return app_new.app.test_client()
+
+    def test_local_request_allowed_without_credentials(self, monkeypatch):
+        # 无凭据 + 本地绑定 + 本地请求 → 放行
+        client = self._client(monkeypatch, username="", password="")
+        resp = client.get("/", environ_base={"REMOTE_ADDR": "127.0.0.1"})
+        assert resp.status_code == 200
+
+    def test_session_authed_allowed(self, monkeypatch):
+        client = self._client(monkeypatch)
+        with client.session_transaction() as sess:
+            sess["authed"] = True
+        resp = client.get("/", environ_base={"REMOTE_ADDR": "10.0.0.1"})
+        assert resp.status_code == 200
+
+    def test_basic_auth_allowed(self, monkeypatch):
+        client = self._client(monkeypatch)
+        resp = client.get(
+            "/",
+            headers={"Authorization": "Basic dTpw"},  # u:p
+            environ_base={"REMOTE_ADDR": "10.0.0.1"},
+        )
+        assert resp.status_code == 200
+
+    def test_unauthed_api_request_returns_401(self, monkeypatch):
+        client = self._client(monkeypatch)
+        resp = client.get(
+            "/api/status",
+            headers={"Accept": "application/json"},
+            environ_base={"REMOTE_ADDR": "10.0.0.1"},
+        )
+        assert resp.status_code == 401
+
+    def test_unauthed_browser_request_redirects_to_login(self, monkeypatch):
+        client = self._client(monkeypatch)
+        resp = client.get(
+            "/",
+            headers={"Accept": "text/html"},
+            environ_base={"REMOTE_ADDR": "10.0.0.1"},
+        )
+        assert resp.status_code == 302
+        assert resp.headers["Location"].endswith("/login")
+
+    def test_health_and_login_paths_are_exempt(self, monkeypatch):
+        client = self._client(monkeypatch)
+        for path in ("/api/health/live", "/api/health/ready", "/login",
+                     "/api/auth/status"):
+            resp = client.get(path, environ_base={"REMOTE_ADDR": "10.0.0.1"})
+            assert resp.status_code != 401, path
+
+
 class TestSystemStatusService:
     def test_status_and_health_payload(self):
         from src.system import SystemStatusService
