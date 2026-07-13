@@ -31,6 +31,12 @@ class TelegramRuntime:
         self.user_info = ""
         self.reconnect_lock = threading.Lock()
         self.last_reconnect_attempt = 0.0
+        self.reconnect_in_progress = False
+        self.reconnect_failures = 0
+        self.reconnect_backoff_base = 8      # 基础冷却秒数
+        self.reconnect_backoff_max = 120     # 冷却上限秒数
+        self.reconnect_timeout = 45          # 后台重连单次超时
+        self._reconnect_thread_factory = threading.Thread
 
         self.cache_lock = threading.RLock()
         self.dialogs_cache = []
@@ -65,8 +71,11 @@ class TelegramRuntime:
     def ensure_connection(self, allow_reconnect=True):
         if self.client.is_connected():
             self.connected = True
-            if self.connect_error.startswith("Telegram 已断开"):
+            if self.connect_error.startswith("Telegram 已断开") or self.connect_error.startswith(
+                "Telegram 重连"
+            ):
                 self.connect_error = ""
+            self.reconnect_failures = 0
             return True
 
         self.connected = False
@@ -80,45 +89,55 @@ class TelegramRuntime:
                 self.connect_error = "Telegram 未连接，请等待重连..."
             return False
 
+        # 后台重连 + 快速失败：绝不在请求线程内同步等待重连完成（原实现会在
+        # reconnect_lock 内 .result(timeout=45) 阻塞 Flask 请求线程最长 45s）。
+        self._maybe_start_reconnect()
+        return False
+
+    def _reconnect_cooldown(self):
+        """指数退避冷却窗口：base, 2*base, 4*base ... 上限 backoff_max。"""
+        window = self.reconnect_backoff_base * (2 ** min(self.reconnect_failures, 5))
+        return min(window, self.reconnect_backoff_max)
+
+    def _maybe_start_reconnect(self):
         now = time.time()
-        if now - self.last_reconnect_attempt < 8:
-            if not self.connect_error:
-                self.connect_error = "Telegram 重连中，请稍后重试..."
-            return False
-
         with self.reconnect_lock:
-            now = time.time()
-            if self.client.is_connected():
-                self.connected = True
-                self.connect_error = ""
-                return True
-
-            if now - self.last_reconnect_attempt < 8:
+            if self.reconnect_in_progress:
                 self.connect_error = self.connect_error or "Telegram 重连中，请稍后重试..."
-                return False
-
+                return
+            if now - self.last_reconnect_attempt < self._reconnect_cooldown():
+                self.connect_error = self.connect_error or "Telegram 重连中，请稍后重试..."
+                return
             self.last_reconnect_attempt = now
+            self.reconnect_in_progress = True
             self.connect_error = "Telegram 已断开，正在重连..."
 
-            try:
-                async def _reconnect():
-                    await self.client.connect()
-                    if not await self.client.is_user_authorized():
-                        raise Exception("Telegram 未登录，请先运行 login.py 登录。")
-                    user = await self.client.get_me()
-                    return self.format_user_display(user)
+        self._reconnect_thread_factory(target=self._run_reconnect, daemon=True).start()
 
-                self.user_info = asyncio.run_coroutine_threadsafe(
-                    _reconnect(),
-                    self.loop,
-                ).result(timeout=45)
-                self.connected = True
-                self.connect_error = ""
-                return True
-            except Exception as exc:
-                self.connected = False
-                self.connect_error = f"Telegram 重连失败: {exc}"
-                return False
+    def _run_reconnect(self):
+        try:
+            async def _reconnect():
+                await self.client.connect()
+                if not await self.client.is_user_authorized():
+                    raise Exception("Telegram 未登录，请先运行 login.py 登录。")
+                user = await self.client.get_me()
+                return self.format_user_display(user)
+
+            user_info = asyncio.run_coroutine_threadsafe(
+                _reconnect(),
+                self.loop,
+            ).result(timeout=self.reconnect_timeout)
+            self.user_info = user_info
+            self.connected = True
+            self.connect_error = ""
+            self.reconnect_failures = 0
+        except Exception as exc:
+            self.connected = False
+            self.connect_error = f"Telegram 重连失败: {exc}"
+            self.reconnect_failures += 1
+        finally:
+            with self.reconnect_lock:
+                self.reconnect_in_progress = False
 
     def run_async(self, coro_factory, timeout=600, allow_reconnect=True, error_label="Telegram"):
         if not callable(coro_factory):

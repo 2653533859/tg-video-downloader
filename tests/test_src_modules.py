@@ -1571,6 +1571,49 @@ class TestTelegramRuntime:
         # entity 缺省时跨频道兜底仍生效
         assert runtime.get_cached_message(100) is msg_a
 
+    def test_ensure_connection_reconnects_in_background(self):
+        from src.telegram.runtime import TelegramRuntime
+
+        client = Mock()
+        client.is_connected.return_value = False
+        loop = Mock()
+        loop.is_running.return_value = True
+        runtime = TelegramRuntime(client=client, loop=loop)
+
+        started = []
+
+        class FakeThread:
+            def __init__(self, target=None, daemon=None):
+                self.target = target
+
+            def start(self):
+                started.append(self.target)
+
+        runtime._reconnect_thread_factory = FakeThread
+
+        # 断开状态：立即快速失败返回 False（不阻塞），并排布一个后台重连线程
+        assert runtime.ensure_connection() is False
+        assert len(started) == 1
+        assert "正在重连" in runtime.connect_error
+        assert runtime.reconnect_in_progress is True
+
+        # 冷却窗口内 / 已有重连进行中：不重复排布线程
+        assert runtime.ensure_connection() is False
+        assert len(started) == 1
+
+    def test_reconnect_cooldown_exponential_backoff(self):
+        from src.telegram.runtime import TelegramRuntime
+
+        runtime = TelegramRuntime(client=Mock(), loop=Mock())
+        runtime.reconnect_failures = 0
+        assert runtime._reconnect_cooldown() == 8
+        runtime.reconnect_failures = 1
+        assert runtime._reconnect_cooldown() == 16
+        runtime.reconnect_failures = 2
+        assert runtime._reconnect_cooldown() == 32
+        runtime.reconnect_failures = 10  # 触顶封顶
+        assert runtime._reconnect_cooldown() == 120
+
     def test_dialog_serialization_prioritizes_saved_messages(self):
         from src.telegram.runtime import TelegramRuntime
 
@@ -1642,6 +1685,53 @@ class TestTelegramVideoService:
         assert cached_status == 200
         assert cached_payload["cached"] is True
         assert calls["iter"] == 1
+
+    def test_list_videos_ttl_expiry_triggers_rescan(self):
+        import threading
+        import time as _time
+        from src.telegram import TelegramVideoService
+
+        entity = Mock(id=123)
+        message = Mock(id=7, message="hello video")
+        message.replies = None
+        calls = {"iter": 0}
+
+        class Client:
+            def iter_messages(self, _entity, **_kwargs):
+                calls["iter"] += 1
+
+                async def gen():
+                    yield message
+
+                return gen()
+
+        videos_cache = {}
+        service = TelegramVideoService(
+            client=Client(),
+            run_async=lambda factory: asyncio.run(factory()),
+            resolve_requested_entity=lambda *_args: (entity, "chat"),
+            video_info_for_message=lambda msg, eid, source="主消息", extra=None: {
+                "id": msg.id,
+                "entity_id": eid,
+            },
+            message_text=lambda msg: msg.message,
+            make_excerpt=lambda text, limit: text[:limit],
+            cache_lock=threading.RLock(),
+            current_entity_cache={},
+            videos_cache=videos_cache,
+            replies_cache={},
+            video_cache_ttl=100,
+        )
+
+        service.list_videos(entity_id=123)
+        assert calls["iter"] == 1
+        # 把缓存条目的时间戳改旧，超过 TTL：下次读应重扫而非返回过期缓存
+        for entry in videos_cache.values():
+            entry["time"] = _time.time() - 200
+        payload, status = service.list_videos(entity_id=123)
+        assert status == 200
+        assert payload.get("cached") is False
+        assert calls["iter"] == 2
 
     def test_list_replies_scans_parent_context(self):
         import threading

@@ -73,10 +73,10 @@
 
 ### 7. 收紧 Telegram 运行时的阻塞与缓存边界
 
-- [ ] `ensure_connection` 重连在 `reconnect_lock` 内同步等待最长 45s（src/telegram/runtime.py:111-114），期间触发它的 Flask 请求线程被阻塞——改为后台重连 + 快速失败返回。
-- [ ] `run_async` 超时后 `future.cancel()`（runtime.py:133-135）——验证协程真正被取消而非继续占用连接；为重连增加指数退避（当前固定 8s 窗口，runtime.py:84）。
+- [x] **✅（2026-07-13 完成）** `ensure_connection` 重连原在 `reconnect_lock` 内 `.result(timeout=45)` 同步阻塞触发它的 Flask 请求线程——已改为**后台重连 + 快速失败**：断开时立即返回 False 并排布后台重连线程（`_maybe_start_reconnect`/`_run_reconnect`），请求线程不再阻塞。新增 `test_ensure_connection_reconnects_in_background`。
+- [x] **✅（2026-07-13 完成）** `run_async` 超时后 `future.cancel()`：`run_coroutine_threadsafe` 返回的 concurrent future 其 `.cancel()` 经内部 `_chain_future` 把取消传播到 loop 线程上的 asyncio task（CPython 语义正确，无需改动）；重连退避已由固定 8s 窗口改为**指数退避**（8/16/32…上限 120s，成功即清零）。新增 `test_reconnect_cooldown_exponential_backoff`。
 - [x] **✅（2026-07-13 完成）** `get_cached_message` 的兜底逻辑会全表扫描并可能返回**其他频道**同 msg_id 的消息（runtime.py:260-273）——已将跨频道兜底循环收敛到仅 `entity_id is None` 时执行；调用方指定 entity 却未命中时返回 `None`，由 worker 兜底走 `resolve_message` 精确重取。新增 `test_get_cached_message_does_not_cross_entity`，pytest 98 passed。
-- [ ] 缓存边界：messages_cache 有 2000 条上限、dialogs 缓存有 300s TTL（已实现），但 `videos_cache`、`replies_cache`、`current_entity_cache` 无容量/TTL 控制——补齐。
+- [x] **✅（2026-07-13 完成）** 缓存边界：messages_cache 有 2000 条上限、dialogs 缓存有 300s TTL（已实现）；`videos_cache`/`replies_cache` 此前只有容量上限（30/500）无 TTL，已在读取路径补 TTL 校验（`_cache_fresh`，默认 300s，复用写入时已存的 `time` 字段）；`current_entity_cache` 经核查是固定 ~5 键的当前实体暂存 dict、不会无界增长，无需 TTL/容量。新增 `test_list_videos_ttl_expiry_triggers_rescan`。
 - 验收：网络断开、代理不可用、API 超时、重连期间请求四类场景下不阻塞 Flask 线程、不泄漏线程、不串消息。
 - 相关文件：`src/telegram/runtime.py`、`src/telegram/health_checker.py`。
 

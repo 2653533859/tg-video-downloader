@@ -18,6 +18,8 @@ class TelegramVideoService:
         replies_cache,
         max_video_cache_size=30,
         max_reply_cache_size=500,
+        video_cache_ttl=300,
+        reply_cache_ttl=300,
         log_warning=None,
     ):
         self.client = client
@@ -32,7 +34,19 @@ class TelegramVideoService:
         self.replies_cache = replies_cache
         self.max_video_cache_size = max_video_cache_size
         self.max_reply_cache_size = max_reply_cache_size
+        self.video_cache_ttl = video_cache_ttl
+        self.reply_cache_ttl = reply_cache_ttl
         self.log_warning = log_warning or (lambda message: None)
+
+    @staticmethod
+    def _cache_fresh(entry, ttl):
+        """条目是否在 TTL 内；ttl<=0 视为永不过期（关闭 TTL）。"""
+        if not entry:
+            return False
+        if not ttl or ttl <= 0:
+            return True
+        return (time.time() - entry.get("time", 0)) < ttl
+
 
     @staticmethod
     def video_cache_key(entity_id, limit, include_replies, reply_post_limit=0):
@@ -71,7 +85,7 @@ class TelegramVideoService:
             self.current_entity_cache["entity_id"] = current_entity_id
             cached_videos = self.videos_cache.get(cache_key)
 
-        if cached_videos and not refresh:
+        if cached_videos and not refresh and self._cache_fresh(cached_videos, self.video_cache_ttl):
             return {
                 "videos": cached_videos.get("videos", []),
                 "posts_with_replies": cached_videos.get("posts_with_replies", []),
@@ -127,7 +141,7 @@ class TelegramVideoService:
         with self.cache_lock:
             cached = self.replies_cache.get(cache_key)
 
-        if cached and not refresh:
+        if cached and not refresh and self._cache_fresh(cached, self.reply_cache_ttl):
             return {"videos": cached.get("videos", []), "cached": True}, 200
 
         async def scan_one_post_replies():
