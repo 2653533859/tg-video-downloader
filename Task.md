@@ -60,15 +60,16 @@
 - [x] **P1-5b-1 ✅（2026-07-13 完成）**：用 ast 脚本精确摘除 app.py 死路由——32 个整函数（含 `enforce_access_control`/`index`）、2 个仅摘装饰器（`api_get_proxy_settings`/`api_set_proxy_settings`，函数体被 app_new 以 runtime 前缀调用故保留）、`app = Flask(__name__)` 实例、`url_map` 注册、孤立的 `SignedIntConverter` 类与未使用 flask 导入。app.py 从 2654 行减至 **1940 行**。验收：pytest 87 全绿、冒烟导入路由数 32 不变、关键路由抽查通过、无 `@app` 残留。逐函数引用分析确认 src/routes/ 的同名函数是独立 Blueprint 实现而非引用。
 - [ ] **P1-5b-2（待做）**：精简 app_new.py 每个 Blueprint 20-30 个参数的手工注入，改为传 runtime/服务对象（接口设计变更，单独成批）。
 
-### 6. 重构下载调度和线程生命周期
+### 6. 重构下载调度和线程生命周期（P1-6a ✅ / P1-6b/c 待做）
 
-- [ ] 用固定 worker pool 替代每任务 `threading.Thread(daemon=True)`（app.py:647）；当前 `MAX_CONCURRENT_DOWNLOADS = 1`（app.py:488）靠 DownloadScheduler 计数槽位控制。
-- [ ] 简化 DownloadScheduler 的 `released_stalled_task_ids` 计数补偿逻辑（src/download/scheduler.py:89-117）：watchdog 释放槽位与正常完成释放之间用计数器对冲，难以推理且容易在异常路径下泄漏/超发槽位——改为显式的任务归属跟踪。
-- [ ] 明确任务状态机迁移表（done/skipped/error/cancelled 四个终态），禁止 watchdog 重启、用户取消、自动恢复互相覆盖终态。
-- [ ] 增加优雅退出：当前所有后台线程（双 Telegram 线程、队列处理器、watchdog、健康检查、缩略图清理、DB 备份）全是 daemon 线程，进程退出直接杀死，无清理路径——下载中的文件和状态可能不一致。
-- [ ] tdl 单实例 Bolt DB 约束做成调度器级资源锁，而非依赖 max_concurrent=1 的隐含行为。
-- 验收：并发提交、取消、重试、watchdog 恢复、进程重启恢复五类场景有集成测试。
-- 相关文件：`app.py`、`src/download/scheduler.py`、`src/download/worker.py`、`src/download/watchdog.py`。
+- [ ] **（P1-6c）** 用固定 worker pool 替代每任务 `threading.Thread(daemon=True)`（app.py:647）；当前 `MAX_CONCURRENT_DOWNLOADS = 1`（app.py:488）靠 DownloadScheduler 计数槽位控制。
+- [x] **P1-6a ✅（2026-07-13）** 简化 DownloadScheduler 计数补偿逻辑：重写 `src/download/scheduler.py`，用单调递增 generation 令牌跟踪槽位归属（`get_next_task` 发当代令牌并占槽，`release_tasks` 持匹配令牌才还槽，`release_scheduled_task` 直接作废当代令牌）——消除"正常释放 vs 停滞释放"的计数对冲，杜绝槽位泄漏/超发；原 `released_stalled_task_ids` 计数已移除。
+- [x] **P1-6a ✅（2026-07-13）** 明确任务状态机迁移表：新建 `src/download/transitions.py`（`can_transition`/`is_terminal` + 显式邻接表），四终态 `done/skipped/error/cancelled` 默认不可迁出；`set_task_state`/`update_task_state` 接入校验（自动流程 `allow_revive=False` 禁覆盖终态，仅 resume/retry `allow_revive=True` 可复活）；`_restart_stalled_download`/`_recover_stalled_tasks` 改走状态机，watchdog 不再重启已完成任务。
+- [ ] **（P1-6b）** 增加优雅退出：当前所有后台线程（双 Telegram 线程、队列处理器、watchdog、健康检查、缩略图清理、DB 备份）全是 daemon 线程，进程退出直接杀死，无清理路径——下载中的文件和状态可能不一致。
+- [ ] **（P1-6c）** tdl 单实例 Bolt DB 约束做成调度器级资源锁，而非依赖 max_concurrent=1 的隐含行为。
+- P1-6a 验收结果：新增 `tests/test_transitions.py`（6 项）+ scheduler 令牌测试（4 项）；全量 **97 passed**（原 87 零回归）；`py_compile` 通过；隔离冒烟装配成功（32 路由）、终态保护生效（watchdog 覆盖 `done→error` 被拒、resume 复活 `done→queued` 放行）。
+- 验收（P1-6 整体）：并发提交、取消、重试、watchdog 恢复、进程重启恢复五类场景有集成测试。
+- 相关文件：`app.py`、`src/download/scheduler.py`、`src/download/transitions.py`、`src/download/worker.py`、`src/download/watchdog.py`。
 
 ### 7. 收紧 Telegram 运行时的阻塞与缓存边界
 

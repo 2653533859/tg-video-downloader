@@ -80,6 +80,7 @@ from src.download.manager import DownloadManager
 from src.download.resume import ResumeStore
 from src.download.scheduler import DownloadScheduler
 from src.download.status import build_download_status_payload
+from src.download.transitions import TERMINAL_STATES, can_transition
 from src.download.task_actions import (
     clear_tasks_by_scope,
     query_task_history_payload as build_task_history_payload,
@@ -143,8 +144,7 @@ relay_connect_error = ""
 download_status = {}
 # 下载取消标记: task_id -> True
 download_cancel = {}
-# 终止态集合，避免回调在任务完成后继续覆盖状态
-TERMINAL_STATES = {"done", "skipped", "error", "cancelled"}
+# 终止态集合 TERMINAL_STATES 与状态迁移校验 can_transition 由 src.download.transitions 提供
 status_lock = threading.RLock()
 cache_lock = threading.RLock()
 TDL_MAX_EOF_RETRIES = 15
@@ -169,10 +169,16 @@ def _watchdog_tasks_snapshot():
 def _restart_stalled_download(task_id, task):
     dialog_name = task.get('dialog_name', '')
 
-    with status_lock:
-        if task_id in download_status:
-            download_status[task_id]['status'] = 'error'
-            download_status[task_id]['error'] = 'watchdog 检测到停滞，已释放槽位并重新排队...'
+    # 走正规入口标记 error；若任务已到终态（如刚好完成），迁移被拒返回 None，
+    # 此时不应释放槽位或重新入队，直接跳过，避免把已完成任务重新下载。
+    updated = update_task_state(
+        task_id,
+        status='error',
+        error='watchdog 检测到停滞，已释放槽位并重新排队...',
+    )
+    if updated is None:
+        log_info(f"[watchdog] 任务 {task_id} 已非活动/终态，跳过重启")
+        return {"ok": False, "skipped": "not_active"}
 
     _mark_download_cancelled(task_id)
     released = download_scheduler.release_scheduled_task(task_id)
@@ -354,6 +360,12 @@ def _has_tdl_fallback_channel(entity_id):
 def set_task_state(task_id, state):
     with status_lock:
         state = dict(state)
+        new_status = state.get("status")
+        current_status = (download_status.get(task_id) or {}).get("status")
+        # set 语义用于新建与 resume/retry 复活，故 allow_revive=True
+        if not can_transition(current_status, new_status, allow_revive=True):
+            log_warning(f"[state] 拒绝非法状态迁移 {task_id}: {current_status} -> {new_status}")
+            return None
         state["updated_at"] = time.time()
         download_status[task_id] = state
         _persist_task_state(task_id, state)
@@ -415,6 +427,11 @@ def update_task_state(task_id, **updates):
     with status_lock:
         state = download_status.get(task_id)
         if state is None:
+            return None
+        new_status = updates.get("status")
+        # 增量更新不做复活：终态不能被 watchdog/进度回调覆盖为其它状态
+        if new_status is not None and not can_transition(state.get("status"), new_status, allow_revive=False):
+            log_warning(f"[state] 拒绝非法状态迁移 {task_id}: {state.get('status')} -> {new_status}")
             return None
         state.update(updates)
         state["updated_at"] = time.time()
@@ -503,16 +520,16 @@ def _recover_stalled_tasks(force=False, timeout=TASK_STALL_TIMEOUT):
 
                 log_warning(f"检测到任务疑似卡住 [{task_id}]，正在释放槽位并停止任务")
                 _mark_download_cancelled(task_id)
-                state.update({
-                    "status": "error",
-                    "error": "任务疑似卡住，已释放下载槽位，请重试",
-                    "speed": "",
-                    "speed_bps": 0.0,
-                    "queue_position": None,
-                    "queue_size": 0,
-                    "finish_time": now,
-                    "updated_at": now,
-                })
+                update_task_state(
+                    task_id,
+                    status="error",
+                    error="任务疑似卡住，已释放下载槽位，请重试",
+                    speed="",
+                    speed_bps=0.0,
+                    queue_position=None,
+                    queue_size=0,
+                    finish_time=now,
+                )
                 download_scheduler.release_scheduled_task(task_id)
                 repaired.append(task_id)
 

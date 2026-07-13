@@ -186,6 +186,66 @@ class TestDownloadScheduler:
         assert scheduler.remove_task("t1") is False
         assert scheduler.get_status()["queued"] == 0
 
+    def test_generation_token_assigned(self):
+        from src.download.scheduler import DownloadScheduler, GENERATION_KEY
+
+        scheduler = DownloadScheduler(max_concurrent=1)
+        scheduler.add_task({"task_id": "t1"})
+        task = scheduler.get_next_task()
+        assert task[GENERATION_KEY] >= 1
+        assert scheduler.get_status()["active"] == 1
+
+    def test_double_release_is_idempotent(self):
+        # 同一占槽被重复 release 只减一次，杜绝槽位超发
+        from src.download.scheduler import DownloadScheduler
+
+        scheduler = DownloadScheduler(max_concurrent=2)
+        scheduler.add_task({"task_id": "t1"})
+        task = scheduler.get_next_task()
+        assert scheduler.get_status()["active"] == 1
+
+        scheduler.release_tasks([task])
+        scheduler.release_tasks([task])  # 陈旧的第二次释放
+        assert scheduler.get_status()["active"] == 0
+
+    def test_watchdog_revoke_then_stale_release(self):
+        # watchdog 撤销当代令牌还槽后，原 worker 携旧令牌 release 应被忽略
+        from src.download.scheduler import DownloadScheduler
+
+        scheduler = DownloadScheduler(max_concurrent=1)
+        scheduler.add_task({"task_id": "t1"})
+        task_gen1 = scheduler.get_next_task()
+        assert scheduler.get_status()["active"] == 1
+
+        # watchdog 撤销：立即还槽
+        assert scheduler.release_scheduled_task("t1") is True
+        assert scheduler.get_status()["active"] == 0
+
+        # 任务重新入队并再次占槽（新一代令牌）
+        scheduler.add_task({"task_id": "t1"})
+        task_gen2 = scheduler.get_next_task()
+        assert task_gen2 is not None
+        assert scheduler.get_status()["active"] == 1
+
+        # 原 worker 迟到的释放：携带旧令牌，必须被忽略，不能误还新一代的槽
+        scheduler.release_tasks([task_gen1])
+        assert scheduler.get_status()["active"] == 1
+
+        # 新 worker 正常释放
+        scheduler.release_tasks([task_gen2])
+        assert scheduler.get_status()["active"] == 0
+
+    def test_release_scheduled_removes_queued_task(self):
+        # 撤销仍在排队（未占槽）的任务：从队列移除，不影响 active 计数
+        from src.download.scheduler import DownloadScheduler
+
+        scheduler = DownloadScheduler(max_concurrent=1)
+        scheduler.add_task({"task_id": "t1"})
+        scheduler.add_task({"task_id": "t2"})
+        scheduler.get_next_task()  # t1 占槽
+        assert scheduler.release_scheduled_task("t2") is True  # t2 仍排队
+        assert scheduler.get_status() == {"active": 1, "queued": 0, "max": 1}
+
 
 class TestDownloadManager:
     def test_enqueue_selects_telegram(self):
