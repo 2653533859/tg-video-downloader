@@ -1556,6 +1556,21 @@ class TestTelegramRuntime:
         runtime.current_entity_cache["entity_id"] = -100123
         assert runtime.get_cached_message(42) is message
 
+    def test_get_cached_message_does_not_cross_entity(self):
+        from src.telegram.runtime import TelegramRuntime
+
+        runtime = TelegramRuntime(client=Mock(), loop=Mock())
+        msg_a = Mock()
+        msg_a.id = 100
+        runtime.cache_message(msg_a, -100111)
+
+        # 指定了另一个频道且未命中：不得返回其他频道同 msg_id 的消息
+        assert runtime.get_cached_message(100, -100999) is None
+        # 同频道精确命中仍正常
+        assert runtime.get_cached_message(100, -100111) is msg_a
+        # entity 缺省时跨频道兜底仍生效
+        assert runtime.get_cached_message(100) is msg_a
+
     def test_dialog_serialization_prioritizes_saved_messages(self):
         from src.telegram.runtime import TelegramRuntime
 

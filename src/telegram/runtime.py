@@ -267,9 +267,11 @@ class TelegramRuntime:
                 key = self.make_msg_cache_key(last_eid, msg_id)
                 if key and key in self.messages_cache:
                     return self.messages_cache[key]
-            for (_eid, mid), message in list(self.messages_cache.items()):
-                if mid == msg_id:
-                    return message
+                # 仅在调用方未指定 entity 时才做跨频道兜底；指定了 entity 却未命中
+                # 必须返回 None，避免返回其他频道同 msg_id 的消息导致下错文件。
+                for (_eid, mid), message in list(self.messages_cache.items()):
+                    if mid == msg_id:
+                        return message
         return None
 
     def resolve_requested_entity(self, source="dialog", dialog_index=None, entity_id=None):

@@ -75,7 +75,7 @@
 
 - [ ] `ensure_connection` 重连在 `reconnect_lock` 内同步等待最长 45s（src/telegram/runtime.py:111-114），期间触发它的 Flask 请求线程被阻塞——改为后台重连 + 快速失败返回。
 - [ ] `run_async` 超时后 `future.cancel()`（runtime.py:133-135）——验证协程真正被取消而非继续占用连接；为重连增加指数退避（当前固定 8s 窗口，runtime.py:84）。
-- [ ] `get_cached_message` 的兜底逻辑会全表扫描并可能返回**其他频道**同 msg_id 的消息（runtime.py:270-273）——跨 entity 返回错误消息会导致下错文件，改为要求 entity_id 匹配。
+- [x] **✅（2026-07-13 完成）** `get_cached_message` 的兜底逻辑会全表扫描并可能返回**其他频道**同 msg_id 的消息（runtime.py:260-273）——已将跨频道兜底循环收敛到仅 `entity_id is None` 时执行；调用方指定 entity 却未命中时返回 `None`，由 worker 兜底走 `resolve_message` 精确重取。新增 `test_get_cached_message_does_not_cross_entity`，pytest 98 passed。
 - [ ] 缓存边界：messages_cache 有 2000 条上限、dialogs 缓存有 300s TTL（已实现），但 `videos_cache`、`replies_cache`、`current_entity_cache` 无容量/TTL 控制——补齐。
 - 验收：网络断开、代理不可用、API 超时、重连期间请求四类场景下不阻塞 Flask 线程、不泄漏线程、不串消息。
 - 相关文件：`src/telegram/runtime.py`、`src/telegram/health_checker.py`。
