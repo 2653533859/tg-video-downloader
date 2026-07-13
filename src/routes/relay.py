@@ -73,6 +73,9 @@ def relay_media(entity_id, msg_id):
             return jsonify({"error": "relay concurrency limit reached"}), 503
         active_relays += 1
 
+    # streaming=True 时把槽位所有权移交给生成器的 finally 释放；其余任何提前
+    # 返回/异常路径由本函数 finally 释放，避免 400/403 早退导致的槽位泄漏。
+    streaming = False
     try:
         file_name = request.args.get("file_name", "")
         token = request.args.get("token", "")
@@ -129,20 +132,24 @@ def relay_media(entity_id, msg_id):
                     f"释放槽位 (当前活跃: {active_relays})"
                 )
 
-        return Response(
+        response = Response(
             _generate_with_cleanup(),
             status=status_code,
             mimetype=media.get("mime_type") or "application/octet-stream",
             headers=headers,
         )
+        streaming = True
+        return response
 
     except Exception as exc:
-        with relay_lock:
-            active_relays = max(0, active_relays - 1)
-
         _log_error(f"[relay:{entity_id}:{msg_id}] relay route failed: {exc}")
 
         if "token" in str(exc).lower():
             return jsonify({"error": str(exc)}), 403
 
         return jsonify({"error": str(exc)}), 502
+
+    finally:
+        if not streaming:
+            with relay_lock:
+                active_relays = max(0, active_relays - 1)

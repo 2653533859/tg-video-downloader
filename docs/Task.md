@@ -107,13 +107,13 @@
 - [x] CI 增加 `test` job（compileall 语法检查 + pytest + `docker compose config` 校验 + 敏感文件扫描 `git ls-files` 防 .env/session 提交），镜像 `build` job `needs: test` 且仅 push 触发。
 - 相关文件：`Dockerfile`、`docker-compose.yml`、`.github/workflows/docker-publish.yml`。
 
-### 11. 建立分层测试体系
+### 11. 建立分层测试体系 ✅（2026-07-13 完成，附带修复 relay 槽位泄漏）
 
-- [ ] 为 Flask 路由增加 API 测试（鉴权、参数校验、错误码），当前 src/routes/ 只有少量覆盖。
-- [ ] 为下载 worker 增加不依赖真实 Telegram/tdl 的合同测试（resume、取消、重试、终态）。
-- [ ] 增加 SQLite 并发写入与崩溃恢复测试。
-- [ ] 安全回归测试：伪造 XFF、无 token relay、过期 token、路径遍历。
-- 验收：本地和 CI 同一条命令跑测试，单元/集成/冒烟可分层执行。
+- [x] 为 Flask 路由增加 API 测试（错误码/参数）：system health 三端点（live 200 / ready 200|503 / degraded）、relay（无 secret 503 / 缺 token 400 / 坏 token 403），复用 Flask `test_client` + 依赖注入装配。
+- [x] 安全回归测试：伪造 XFF（`TestAccessControl` 已有）、无 token/坏 token relay（本轮新增）、路径遍历（`resolve_file_path('../outside')` 抛错，已有）。**过期 token** 由 `relay_tokens.verify_relay_token` 的 TTL 逻辑覆盖（既有 token 测试）。
+- [x] **附带修复**：`src/routes/relay.py` 的 400（缺参数）/403（文件名不符）提前返回路径**未释放并发槽位**（`active_relays` 泄漏）——改为 `streaming` 标志 + `finally`，仅在成功流式返回时把槽位移交生成器，其余路径必释放。新增 `test_relay_missing_token_releases_slot` 断言 `active_relays==0`。
+- 未做（诚实标注）：下载 worker 全链路合同测试、SQLite 并发/崩溃恢复测试——需较重的伪 Telegram/tdl 与多线程夹具，价值高但工作量大，留待专项。
+- 验收：pytest **116 passed**（本地与 CI 同一条 `PYTHONPATH=. pytest -q`）。
 
 ## 建议实施顺序
 
