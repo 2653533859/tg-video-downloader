@@ -22,7 +22,7 @@ python3 app_new.py    # 等价入口
 两者**最终 serve 的都是 `app_new.app`（Blueprint 装配版）**：`app.py` 的 `__main__`（app.py:1932）会 `import app_new` 并调用 `app_new.app.run()`。
 
 - `app.py`（约 1940 行）：**运行时模块**——持有全局状态、Telegram 客户端、下载调度等，大量委托 `src/` 模块。**不含任何路由定义**（P1-5b 已摘除历史死路由），全部路由在 `src/routes/` 的 Blueprint 中。
-- `app_new.py`：Blueprint 装配层——把 `src/routes/` 的 6 个 Blueprint 用 `app.py` 的运行时函数注入初始化。
+- `app_new.py`：Blueprint 装配层——把 `src/routes/` 的 7 个 Blueprint 用 `app.py` 的运行时函数注入初始化。
 - **新增/修改路由一律在 `src/routes/` 中进行**，并在 `app_new.py` 的对应 `init_blueprint` 中注入依赖。
 
 ## src/ 模块地图
@@ -36,7 +36,8 @@ src/
 ├── state/       # TaskStatePersistence(persistence.py: SQLite WAL) + manager
 ├── files/       # 文件服务(service.py: 路径校验/列表)、缩略图(thumbnails)
 ├── relay/       # Range 请求解析（在线播放用）
-├── routes/      # 6 个 Blueprint: system/files/telegram/download/misc/relay
+├── routes/      # 7 个 Blueprint: auth/system/files/telegram/download/misc/relay
+│                # auth = 网页会话登录（/login、/api/login|logout|auth/status）
 ├── security/    # access.py(纯逻辑) + flask_access.py(Flask 适配)
 ├── system/      # startup(启动编排) + status(状态服务)
 └── utils/       # formatting、validators
@@ -61,13 +62,29 @@ src/
 - 断点续传信息：ResumeStore（JSON 文件）
 - Telethon 会话：`tg_downloader.session`（**敏感文件，已被 .gitignore/.dockerignore 排除**）
 
+## 鉴权（混合，P2 引入）
+
+- **Web 访问**：`app_new.py:enforce_access_control`（before_request）四路放行——
+  1. 豁免路径（`/login`、`/api/login|logout|auth/status`、`/static/`、`/relay/`、health live/ready）
+  2. cookie 会话已登录（`session["authed"]`）
+  3. 回退 Basic Auth（本地请求在 `require_web_auth` 内部直接放行）
+  4. 未认证时：浏览器请求（`Accept: text/html`）302 跳 `/login`，API/XHR 沿用 401/403。
+  Basic Auth 保留，`healthcheck.sh` / API 客户端零改动；会话签名密钥见 `WEB_SESSION_SECRET`。
+- **Telegram 登录**：session 缺失/未授权时**进程不再退出**——`src/telegram/startup.py` 改为
+  `runtime.mark_needs_login()` + 保活 `loop.run_forever()`，且**未授权不启动健康检查**（避免反复重连）。
+  网页向导 `src/routes/telegram.py` 的 `/api/tg/login/{status,send_code,sign_in,password}`
+  （手机号→验证码→2FA）完成登录，`phone_code_hash` 存于受锁保护的单 slot；成功后
+  `app.py:finalize_tg_login` 收尾（get_me → mark_connected → 启动健康检查）。`login.py` CLI 仍可用作备选。
+- 登录端点均处在 Web 鉴权之后：非本地部署务必配 `WEB_AUTH_*`（现有 fail-closed 已保证）。
+
 ## 配置（config.py，全部环境变量）
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
 | `TG_API_ID` / `TG_API_HASH` | 必填 | Telegram API 凭据 |
 | `WEB_BIND_HOST` / `WEB_BIND_PORT` | 127.0.0.1 / **5003** | 非本地绑定必须配认证 |
-| `WEB_AUTH_USERNAME` / `WEB_AUTH_PASSWORD` | 空 | Basic Auth（非本地无凭据返回 403，fail-closed） |
+| `WEB_AUTH_USERNAME` / `WEB_AUTH_PASSWORD` | 空 | 混合鉴权凭据：同时用于 Basic Auth 与网页登录页校验（非本地无凭据返回 403，fail-closed） |
+| `WEB_SESSION_SECRET` | 空 | Flask 会话签名密钥；空时由 `WEB_AUTH_*` 经 sha256 派生（重启不失效），仍空则进程内随机（仅本地开发） |
 | `TG_PROXY_ENABLED` / `TG_PROXY_TYPE` | true / http | **仅支持 http**（ALLOWED_PROXY_TYPES，导入时校验，socks5 会直接抛错） |
 | `TRUST_FORWARDED_FOR` | false | 仅在可信反向代理后设 true，否则 X-Forwarded-For 不参与本地判定（防伪造绕过认证） |
 | `RELAY_TOKEN_SECRET` | 空 | 空=relay/在线播放禁用（503）；用于 HMAC 签名 |
@@ -79,7 +96,7 @@ src/
 
 ```bash
 # 首次登录（生成 session 文件）
-python3 login.py
+python3 login.py                    # CLI 交互式；亦可先启动服务，再用网页向导登录
 
 # 启动
 python3 app.py                      # 或 python3 app_new.py，等价
@@ -101,6 +118,7 @@ sqlite3 .task_state/tasks.sqlite3 "SELECT task_id, json_extract(state_json,'$.st
 - 文件：`/api/files`、`/api/file/<path>`、`/api/stream/<path>`（Range 支持）、`POST /api/rename-file|delete-file|open-folder`
 - 在线播放：`/api/online-play-url` → `/relay/<entity_id>/<msg_id>?token=<HMAC签名>`（豁免 Basic Auth，靠 token 保护）
 - 系统：`/api/status`、`/api/health`、`/api/settings/proxy`
+- 鉴权：网页登录 `GET /login`、`POST /api/login|logout`、`GET /api/auth/status`（豁免 Basic）；TG 网页登录向导 `GET /api/tg/login/status`、`POST /api/tg/login/send_code|sign_in|password`
 - 调试（需 DEBUG_API_ENABLED）：`/api/debug*`
 
 ## Development Notes
