@@ -205,6 +205,9 @@ _AUTH_EXEMPT_PATHS = (
     "/api/login",
     "/api/logout",
     "/api/auth/status",
+    # 浏览器访问任何页面都会自动请求 /favicon.ico；豁免它并返回 204（见 favicon 路由），
+    # 否则该请求走认证分支返回 401 会触发浏览器原生 Basic 登录框。
+    "/favicon.ico",
 )
 
 
@@ -240,6 +243,13 @@ def enforce_access_control():
     if _wants_html() and WEB_AUTH_USERNAME and WEB_AUTH_PASSWORD:
         return redirect("/login")
     return result
+
+
+@app.route("/favicon.ico")
+def favicon():
+    # 豁免路径（见 _AUTH_EXEMPT_PATHS）：返回 204 空响应，避免浏览器 favicon
+    # 请求走认证分支触发原生 Basic 弹框；浏览器退回默认标签图标即可。
+    return "", 204
 
 
 @app.route("/api/settings/proxy", methods=["GET"])

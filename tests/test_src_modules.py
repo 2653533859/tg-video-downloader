@@ -1024,7 +1024,16 @@ class TestAccessControl:
             assert status == 403
             assert response.get_json()["error"] == "Web auth is required for non-local access"
 
+        # 未带 Authorization（浏览器普通请求，如 favicon）：401 但【不】回 WWW-Authenticate，
+        # 避免浏览器弹出原生 Basic 登录框。
         with app.test_request_context("/", environ_base={"REMOTE_ADDR": "10.0.0.1"}):
+            response = require_web_auth(request, "0.0.0.0", "u", "p")
+            assert response.status_code == 401
+            assert "WWW-Authenticate" not in response.headers
+
+        # 带（错误的）Authorization 头（真正的 API/Basic 客户端）：401 且回 WWW-Authenticate 促其重试。
+        bad = {"Authorization": "Basic d3Jvbmc6Y3JlZHM="}  # base64("wrong:creds")
+        with app.test_request_context("/", headers=bad, environ_base={"REMOTE_ADDR": "10.0.0.1"}):
             response = require_web_auth(request, "0.0.0.0", "u", "p")
             assert response.status_code == 401
             assert response.headers["WWW-Authenticate"] == 'Basic realm="tg-video-downloader"'
