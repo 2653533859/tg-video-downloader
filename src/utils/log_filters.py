@@ -11,12 +11,19 @@ import re
 
 # (?i) 忽略大小写。顺序敏感：Basic/Bearer 头先脱敏，再处理 key=value。
 # 键用 \w* 前缀覆盖 env 变量式命名（WEB_AUTH_PASSWORD / TG_API_HASH /
-# RELAY_TOKEN_SECRET 等），但敏感词必须紧邻分隔符（无 \w* 后缀），以免误伤
-# token_ttl / authorization_status 这类以敏感词为前缀的良性字段。
+# RELAY_TOKEN_SECRET 等），并保留敏感词后缀（secret_key / token_id /
+# password_hash 等前缀式密钥必须脱敏）；仅用负向先行排除 token_ttl /
+# authorization_status 这类以敏感词为前缀的良性字段（值非密钥）。
+_BENIGN_SUFFIXES = (
+    "ttl|status|type|name|count|enabled|disabled|expiry|expires|expiration|"
+    "timeout|seconds|version|host|port|url|length|level|mode"
+)
 _SENSITIVE_PATTERNS = [
     re.compile(r"(?i)(\b(?:basic|bearer)\s+)([A-Za-z0-9+/=._-]{8,})"),
     re.compile(
-        r"(?i)(\w*(?:password|passwd|pwd|api_?hash|secret|token|authorization)\s*[=:]\s*[\"']?)"
+        r"(?i)(\w*(?:password|passwd|pwd|api_?hash|secret|token|authorization)"
+        rf"(?!_?(?:{_BENIGN_SUFFIXES})\b)"
+        r"\w*\s*[=:]\s*[\"']?)"
         r"([^\s,&\"';]+)"
     ),
 ]

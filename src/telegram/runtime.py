@@ -79,6 +79,15 @@ class TelegramRuntime:
         self.connect_error = message
 
     def ensure_connection(self, allow_reconnect=True):
+        # 会话未授权（等待网页登录向导）：此时 client 虽已 transport 连接，但绝不能
+        # 视为“已连接”——否则 _sync_tg_runtime_state 会把全局 tg_connected 置真，
+        # 使 /api/health/ready 误报 200、/api/tg/login/status 误报 authorized。
+        # 登录成功后由 mark_connected 清除 needs_login，本分支自然失效。
+        if self.needs_login:
+            self.connected = False
+            if not self.connect_error:
+                self.connect_error = "Telegram 未登录，请通过网页向导登录"
+            return False
         if self.client.is_connected():
             self.connected = True
             if self.connect_error.startswith("Telegram 已断开") or self.connect_error.startswith(

@@ -18,7 +18,6 @@ from config import (
     DOWNLOAD_DIR,
     OPEN_FOLDER_ENABLED,
     PROXY_CONFIG,
-    PUBLIC_BASE_URL,
     RELAY_TOKEN_SECRET,
     TDL_BINARY,
     TRUST_FORWARDED_FOR,
@@ -26,6 +25,7 @@ from config import (
     WEB_AUTH_USERNAME,
     WEB_BIND_HOST,
     WEB_BIND_PORT,
+    WEB_SESSION_COOKIE_SECURE,
     WEB_SESSION_SECRET,
 )
 from relay_tokens import verify_relay_token
@@ -68,8 +68,9 @@ app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
     PERMANENT_SESSION_LIFETIME=timedelta(days=7),
-    # 仅当对外地址是 https 时才要求 Secure，否则纯 http 部署下 cookie 会被浏览器丢弃。
-    SESSION_COOKIE_SECURE=PUBLIC_BASE_URL.lower().startswith("https://"),
+    # 会话 cookie Secure 标志：显式 WEB_SESSION_COOKIE_SECURE 优先，否则按对外
+    # 地址是否 https 推断（config 内解析）。HTTPS 部署应显式设 true 防会话侧录。
+    SESSION_COOKIE_SECURE=WEB_SESSION_COOKIE_SECURE,
 )
 
 

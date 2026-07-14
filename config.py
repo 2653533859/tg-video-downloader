@@ -93,6 +93,21 @@ RELAY_TOKEN_SECRET = os.getenv("RELAY_TOKEN_SECRET", "").strip()
 RELAY_TOKEN_TTL = int(os.getenv("RELAY_TOKEN_TTL", "1800") or "1800")
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").strip()
 
+
+def _resolve_session_cookie_secure():
+    """网页会话 cookie 是否带 Secure 标志。
+    显式 WEB_SESSION_COOKIE_SECURE 优先（HTTPS 部署应设 true 加固，防会话侧录）；
+    未显式配置时回退到按对外地址是否 https 推断，兼容旧行为且不破坏纯 http 部署
+    （Secure cookie 在 http 下会被浏览器丢弃，导致无法登录）。
+    """
+    raw = os.getenv("WEB_SESSION_COOKIE_SECURE", "").strip()
+    if raw:
+        return _strtobool(raw, default=False)
+    return PUBLIC_BASE_URL.lower().startswith("https://")
+
+
+WEB_SESSION_COOKIE_SECURE = _resolve_session_cookie_secure()
+
 # tdl 直连下载配置
 TDL_BINARY = os.getenv("TDL_BINARY", "/usr/local/bin/tdl").strip() or "/usr/local/bin/tdl"
 TDL_NAMESPACE = os.getenv("TDL_NAMESPACE", "default").strip() or "default"

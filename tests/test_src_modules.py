@@ -1410,6 +1410,10 @@ class TestLogRedaction:
         assert redact("authorization_status=ok reply_count=3") == "authorization_status=ok reply_count=3"
         # RELAY_TOKEN_SECRET 这类以敏感词结尾的 env 键仍被脱敏
         assert redact("RELAY_TOKEN_SECRET=deadbeef") == "RELAY_TOKEN_SECRET=***"
+        # 前缀式密钥键（敏感词后接非良性后缀）必须脱敏，防止明文入日志
+        assert redact("secret_key=abc123def") == "secret_key=***"
+        assert redact("session_token_id=xyz789") == "session_token_id=***"
+        assert redact('password_hash: "5f4dcc3b"') == 'password_hash: "***"'
 
     def test_filter_mutates_record(self):
         import logging
