@@ -154,7 +154,9 @@ def api_stream(filepath):
             return jsonify({"error": block_reason}), 409
         mime_type = mimetypes.guess_type(full_path)[0] or 'video/mp4'
         range_hdr = request.headers.get("Range")
-
+        user_agent = request.headers.get("User-Agent", "unknown")
+        referer = request.headers.get("Referer", "none")
+        print(f"[STREAM-REQ] {request.remote_addr} | Range: {range_hdr} | Ref: {referer} | UA: {user_agent[:40]} | {os.path.basename(filepath)}", flush=True)
         # 核心优化：启用 4MB 动态步长流式分块，杜绝浏览器大范围请求被强行 Abort 的风暴
         if range_hdr:
             stream_range = local_stream_range(file_size, range_hdr, chunk_size=4 * 1024 * 1024)
