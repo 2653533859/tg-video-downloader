@@ -1238,7 +1238,7 @@ let currentEntity = null;
             volume: 0.7,
             isLive: false,
             muted: false,
-            autoplay: true,
+            autoplay: false,
             pip: true,
             autoSize: false,
             autoMini: false,
@@ -1262,6 +1262,25 @@ let currentEntity = null;
               playsInline: true,
             },
           });
+
+          artplayerInstance.on('ready', () => {
+            try { artplayerInstance.loading.show = false; } catch (e) {}
+            const playPromise = artplayerInstance.play();
+            if (playPromise && playPromise.catch) {
+              playPromise.catch(err => {
+                console.warn('浏览器自动播放策略拦截，降级为静音秒播:', err);
+                try {
+                  artplayerInstance.muted = true;
+                  artplayerInstance.play().then(() => {
+                    try { artplayerInstance.notice.show = '🔊 浏览器已静音自动播放，点击画面开启声音'; } catch (e) {}
+                  }).catch(() => {
+                    try { artplayerInstance.loading.show = false; } catch (e) {}
+                  });
+                } catch (e) {}
+              });
+            }
+          });
+
           artplayerInstance.on('video:loadedmetadata', () => {
             try { artplayerInstance.loading.show = false; } catch (e) {}
           });
