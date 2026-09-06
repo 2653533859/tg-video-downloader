@@ -1258,8 +1258,12 @@ let currentEntity = null;
             airplay: true,
             theme: '#7289da',
             moreVideoAttr: {
-              crossOrigin: 'anonymous',
+              preload: 'auto',
+              playsInline: true,
             },
+          });
+          artplayerInstance.on('video:error', (err) => {
+            console.error('视频底层播放错误:', err);
           });
         } catch (err) {
           console.error('Artplayer 初始化异常:', err);

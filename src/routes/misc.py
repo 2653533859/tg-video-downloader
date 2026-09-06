@@ -4,6 +4,7 @@
 """
 from flask import Blueprint, jsonify, request, send_from_directory, Response, send_file
 import os
+import mimetypes
 
 from src.files import (
     iter_file_chunks,
@@ -151,23 +152,13 @@ def api_stream(filepath):
         block_reason = _download_file_play_block_reason(full_path, file_size)
         if block_reason:
             return jsonify({"error": block_reason}), 409
-        stream_range = local_stream_range(file_size, request.headers.get("Range"))
-
-        if stream_range:
-            return Response(
-                iter_file_chunks(full_path, stream_range["start"], stream_range["content_length"]),
-                206,
-                mimetype='video/mp4',
-                direct_passthrough=True,
-                headers={
-                    "Content-Range": stream_range["content_range"],
-                    "Accept-Ranges": "bytes",
-                    "Content-Length": str(stream_range["content_length"]),
-                },
-            )
-        else:
-            return send_file(full_path, mimetype='video/mp4')
-
+        mime_type = mimetypes.guess_type(full_path)[0] or 'video/mp4'
+        resp = send_file(full_path, mimetype=mime_type, conditional=True)
+        resp.headers["Accept-Ranges"] = "bytes"
+        resp.headers["Access-Control-Allow-Origin"] = "*"
+        resp.headers["Access-Control-Allow-Headers"] = "Range, Authorization, Content-Type"
+        resp.headers["Access-Control-Expose-Headers"] = "Content-Range, Accept-Ranges, Content-Length"
+        return resp
     except FileNotFoundError:
         return jsonify({"error": "文件不存在"}), 404
     except ValueError as e:
