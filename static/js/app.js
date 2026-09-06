@@ -1543,26 +1543,30 @@ let currentEntity = null;
             : `<button type="button" class="btn-dl" disabled title="${esc(playReason)}">下载中</button>`;
 
           return `<div class="file-item" data-folder="${esc(f.folder)}" data-filename="${esc(f.filename)}" data-playable="${playable ? '1' : '0'}" oncontextmenu="showFileContextMenu(event,this)">
-            <div class="file-item-thumb" onclick="previewFile('${esc(f.folder)}', '${esc(f.filename)}')" onmouseenter="handlePosterHover(this, true)" onmouseleave="handlePosterHover(this, false)">
-              <video preload="metadata" muted playsinline loop src="${streamUrl}#t=1.0"></video>
-              <div class="file-item-play-overlay">▶</div>
-              <div class="file-item-size-badge">${esc(f.size)}</div>
-            </div>
-            <div class="file-info">
-              <div class="file-meta-row">
-                <span class="file-folder-badge" title="${esc(f.folder)}">${esc(f.folder)}</span>
-                <span class="file-size-tag">${esc(f.size)}</span>
-                <span>${esc(f.modified)}</span>
-                ${!playable && playReason ? `<span style="color:#f39c12"> · 下载中</span>` : ''}
+            <div class="file-item-top">
+              <div class="file-item-thumb" onclick="previewFile('${esc(f.folder)}', '${esc(f.filename)}')" onmouseenter="handlePosterHover(this, true)" onmouseleave="handlePosterHover(this, false)">
+                <video preload="metadata" muted playsinline loop src="${streamUrl}#t=1.0"></video>
+                <div class="file-item-play-overlay">▶</div>
+                <div class="file-item-size-badge">${esc(f.size)}</div>
               </div>
-              <div class="fname" title="${esc(f.filename)}" onclick="previewFile('${esc(f.folder)}', '${esc(f.filename)}')">${esc(f.filename)}</div>
+              <div class="file-info">
+                <div class="file-meta-row">
+                  <span class="file-folder-badge" title="${esc(f.folder)}">${esc(f.folder)}</span>
+                  <span class="file-size-tag">${esc(f.size)}</span>
+                  ${!playable && playReason ? `<span style="color:#f39c12;font-size:10px;"> · 下载中</span>` : ''}
+                </div>
+                <div class="fname" title="${esc(f.filename)}" onclick="previewFile('${esc(f.folder)}', '${esc(f.filename)}')">${esc(f.filename)}</div>
+              </div>
             </div>
-            <div class="file-btns">
-              ${playBtn}
-              ${gdriveBtn}
-              <a class="btn-dl" href="${dlUrl}" download="${esc(f.filename)}" title="下载到电脑">下载</a>
-              <button type="button" class="btn-dl" onclick="openFolder('${esc(f.folder)}')" title="打开服务器本地目录">目录</button>
-              <button type="button" class="btn-dl btn-dl-danger" onclick="deleteFile('${esc(f.folder)}', '${esc(f.filename)}')" title="删除本地文件">删除</button>
+            <div class="file-item-bottom">
+              <span class="file-item-time">${esc(f.modified)}</span>
+              <div class="file-btns">
+                ${playBtn}
+                ${gdriveBtn}
+                <a class="btn-dl" href="${dlUrl}" download="${esc(f.filename)}" title="下载到电脑">下载</a>
+                <button type="button" class="btn-dl" onclick="openFolder('${esc(f.folder)}')" title="打开服务器本地目录">目录</button>
+                <button type="button" class="btn-dl btn-dl-danger" onclick="deleteFile('${esc(f.folder)}', '${esc(f.filename)}')" title="删除本地文件">删除</button>
+              </div>
             </div>
           </div>`;
         }).join('');
