@@ -1251,7 +1251,12 @@ let currentEntity = null;
       document.getElementById('tabRecovery').style.display = tab === 'recovery' ? '' : 'none';
       document.getElementById('taskToolbar').style.display = tab === 'downloads' ? 'flex' : 'none';
       if (isMobileLayout()) setMobilePanel('downloads');
-      if (tab === 'files') loadFiles();
+      if (tab === 'files') {
+        loadFiles();
+        startGDrivePolling();
+      } else {
+        stopGDrivePolling();
+      }
       if (tab === 'history') loadHistory(1);
       if (tab === 'recovery') loadRecovery();
     }
@@ -1344,18 +1349,18 @@ let currentEntity = null;
           if (gTask) {
             if (gTask.status === 'uploading') {
               const spd = gTask.speed ? ` · ${esc(gTask.speed)}` : '';
-              gdriveBtn = `<button type="button" class="btn-dl" style="color:var(--accent)" disabled title="上传中">云盘 ${gTask.progress}%${spd}</button>`;
+              gdriveBtn = `<button type="button" class="btn-dl btn-gdrive" style="color:var(--accent)" disabled title="上传中">云盘 ${gTask.progress}%${spd}</button>`;
             } else if (gTask.status === 'pending') {
-              gdriveBtn = `<button type="button" class="btn-dl" style="color:#aaa" disabled title="排队中">云盘排队</button>`;
+              gdriveBtn = `<button type="button" class="btn-dl btn-gdrive" style="color:#aaa" disabled title="排队中">云盘排队</button>`;
             } else if (gTask.status === 'done') {
-              gdriveBtn = `<button type="button" class="btn-dl" style="color:#4ecca3" disabled title="已保存到 Google 云盘">已存云盘 ✓</button>`;
+              gdriveBtn = `<button type="button" class="btn-dl btn-gdrive" style="color:#4ecca3" disabled title="已保存到 Google 云盘">已存云盘 ✓</button>`;
             } else if (gTask.status === 'error') {
-              gdriveBtn = `<button type="button" class="btn-dl btn-dl-danger" onclick="retryGDriveUpload('${esc(gTask.upload_id)}')" title="${esc(gTask.error)}">重试云盘</button>`;
+              gdriveBtn = `<button type="button" class="btn-dl btn-dl-danger btn-gdrive" onclick="retryGDriveUpload('${esc(gTask.upload_id)}')" title="${esc(gTask.error)}">重试云盘</button>`;
             } else {
-              gdriveBtn = `<button type="button" class="btn-dl" onclick="uploadToGDrive(this.closest('.file-item'))">存云盘</button>`;
+              gdriveBtn = `<button type="button" class="btn-dl btn-gdrive" onclick="uploadToGDrive(this.closest('.file-item'))">存云盘</button>`;
             }
           } else {
-            gdriveBtn = `<button type="button" class="btn-dl" onclick="uploadToGDrive(this.closest('.file-item'))">存云盘</button>`;
+            gdriveBtn = `<button type="button" class="btn-dl btn-gdrive" onclick="uploadToGDrive(this.closest('.file-item'))">存云盘</button>`;
           }
 
           return `<div class="file-item" data-folder="${esc(f.folder)}" data-filename="${esc(f.filename)}" data-playable="${playable ? '1' : '0'}" data-play-reason="${esc(playReason)}" oncontextmenu="showFileContextMenu(event,this)">
@@ -1382,6 +1387,9 @@ let currentEntity = null;
           </div>`;
         }
         targetContainer.innerHTML = html;
+        if (gdriveStatus && (gdriveStatus.current || (gdriveStatus.queue && gdriveStatus.queue.length > 0))) {
+          startGDrivePolling();
+        }
       });
     }
 
@@ -1411,6 +1419,94 @@ let currentEntity = null;
       el.innerHTML = `<span style="color:#4ecca3">●</span> 云盘目标: <b>${esc(targetStr)}</b> · 排队 ${qCount}${activeText}`;
     }
 
+    let gdrivePollTimer = null;
+
+    function startGDrivePolling() {
+      if (gdrivePollTimer) return;
+      pollGDriveStatus();
+      gdrivePollTimer = setInterval(pollGDriveStatus, 2000);
+    }
+
+    function stopGDrivePolling() {
+      if (gdrivePollTimer) {
+        clearInterval(gdrivePollTimer);
+        gdrivePollTimer = null;
+      }
+    }
+
+    function pollGDriveStatus() {
+      fetch('/api/gdrive/status')
+        .then(r => r.json())
+        .then(status => {
+          updateGDriveSummary(status);
+          updateGDriveFileItems(status);
+          const hasActive = status.current || (status.queue && status.queue.length > 0);
+          const filesVisible = document.getElementById('tabFiles')?.style.display !== 'none';
+          if (!hasActive && !filesVisible) {
+            stopGDrivePolling();
+          }
+        })
+        .catch(() => {});
+    }
+
+    function updateGDriveFileItems(status) {
+      if (!status) return;
+      const gdriveMap = {};
+      if (status.current) {
+        const cur = status.current;
+        gdriveMap[`${cur.folder}/${cur.filename}`] = cur;
+      }
+      (status.queue || []).forEach(t => {
+        gdriveMap[`${t.folder}/${t.filename}`] = t;
+      });
+      (status.recent || []).forEach(t => {
+        const k = `${t.folder}/${t.filename}`;
+        if (!gdriveMap[k]) gdriveMap[k] = t;
+      });
+
+      document.querySelectorAll('#tabFiles .file-item').forEach(item => {
+        const folder = item.dataset.folder || '';
+        const filename = item.dataset.filename || '';
+        const key = `${folder}/${filename}`;
+        const t = gdriveMap[key];
+        const btn = item.querySelector('.btn-gdrive');
+        if (!btn) return;
+
+        if (t) {
+          if (t.status === 'uploading') {
+            const spd = t.speed ? ` · ${t.speed}` : '';
+            btn.textContent = `云盘 ${t.progress}%${spd}`;
+            btn.style.color = 'var(--accent)';
+            btn.className = 'btn-dl btn-gdrive';
+            btn.disabled = true;
+            btn.title = '上传中';
+            btn.onclick = null;
+          } else if (t.status === 'pending') {
+            btn.textContent = '云盘排队';
+            btn.style.color = '#aaa';
+            btn.className = 'btn-dl btn-gdrive';
+            btn.disabled = true;
+            btn.title = '排队中';
+            btn.onclick = null;
+          } else if (t.status === 'done') {
+            btn.textContent = '已存云盘 ✓';
+            btn.style.color = '#4ecca3';
+            btn.className = 'btn-dl btn-gdrive';
+            btn.disabled = true;
+            btn.title = '已保存到 Google 云盘';
+            btn.onclick = null;
+          } else if (t.status === 'error') {
+            btn.textContent = '重试云盘';
+            btn.style.color = '';
+            btn.className = 'btn-dl btn-dl-danger btn-gdrive';
+            btn.disabled = false;
+            btn.title = t.error || '上传失败';
+            btn.onclick = () => retryGDriveUpload(t.upload_id);
+          }
+        }
+      });
+    }
+
     function uploadToGDrive(item) {
       const { folder, filename } = fileDataFromItem(item);
       if (!folder || !filename) return;
@@ -1431,6 +1527,7 @@ let currentEntity = null;
           }
         } else {
           loadFiles(filesPage);
+          startGDrivePolling();
         }
       }).catch(err => alert('请求失败: ' + err.message));
     }
@@ -1446,6 +1543,7 @@ let currentEntity = null;
           alert(res.error || '重试失败');
         } else {
           loadFiles(filesPage);
+          startGDrivePolling();
         }
       }).catch(err => alert('请求失败: ' + err.message));
     }
