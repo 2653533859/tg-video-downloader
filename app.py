@@ -135,6 +135,8 @@ from src.telegram import (
 )
 from src.telegram.runtime import TelegramRuntime
 
+from src.uploader import UploadManager
+
 
 from telethon.sessions import StringSession
 
@@ -148,6 +150,13 @@ relay_runtime = TelegramRuntime(relay_tg_client, relay_loop)
 
 # 优雅退出：周期后台循环轮询该事件，收到即退出（配合 shutdown_runtime 编排）
 shutdown_event = threading.Event()
+# Google Drive 上传管理器
+upload_manager = UploadManager()
+
+
+def get_upload_manager():
+    return upload_manager
+
 
 # 连接状态
 tg_connected = False
@@ -1911,6 +1920,7 @@ def get_download_worker():
             format_size=format_size,
             log_info=log_info,
             log_error=log_error,
+            on_download_complete=upload_manager.maybe_auto_enqueue,
         )
     return download_worker
 
@@ -2031,7 +2041,7 @@ def shutdown_runtime(*_args):
             return
         _shutdown_done = True
 
-    stoppables = [obj for obj in (download_watchdog, tg_health_checker, download_worker_pool) if obj is not None]
+    stoppables = [obj for obj in (download_watchdog, tg_health_checker, download_worker_pool, upload_manager) if obj is not None]
     coordinator = GracefulShutdown(
         stop_event=shutdown_event,
         stoppables=stoppables,

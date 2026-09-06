@@ -91,6 +91,11 @@ class TelegramHealthChecker:
     def _perform_check(self):
         """执行健康检查"""
         try:
+            if not self.loop.is_running():
+                self._log_warning("[tg-health] 事件循环未运行")
+                self._handle_check_failure()
+                return
+
             future = asyncio.run_coroutine_threadsafe(
                 self._async_check(),
                 self.loop
@@ -116,11 +121,19 @@ class TelegramHealthChecker:
                 self._log_warning("[tg-health] 客户端未连接")
                 return False
 
-            await asyncio.wait_for(
-                self.client.get_dialogs(limit=1),
-                timeout=10.0,
-            )
-            return True
+            try:
+                from telethon.tl.functions import PingRequest
+                await asyncio.wait_for(
+                    self.client(PingRequest(ping_id=0)),
+                    timeout=15.0,
+                )
+                return True
+            except Exception:
+                await asyncio.wait_for(
+                    self.client.get_me(),
+                    timeout=15.0,
+                )
+                return True
         except asyncio.TimeoutError:
             self._log_warning("[tg-health] 健康检查超时")
             return False
@@ -146,6 +159,10 @@ class TelegramHealthChecker:
     def _attempt_reconnect(self):
         """尝试重新连接"""
         try:
+            if not self.loop.is_running():
+                self._log_error("[tg-health] 重连失败: 事件循环未运行")
+                return
+
             # 与 TelegramRuntime 的后台重连共享 client 锁，串行化对同一 client 的
             # connect/disconnect，避免并发交错导致连接抖动。
             lock = self._reconnect_lock or contextlib.nullcontext()
@@ -154,7 +171,7 @@ class TelegramHealthChecker:
                     self._async_reconnect(),
                     self.loop
                 )
-                future.result(timeout=30)
+                future.result(timeout=60)
             if self.on_reconnect_callback:
                 try:
                     self.on_reconnect_callback()
@@ -168,11 +185,14 @@ class TelegramHealthChecker:
         """异步重连"""
         try:
             self._log_info("[tg-health] 正在断开连接...")
-            await self.client.disconnect()
-            await asyncio.sleep(5)
+            try:
+                await asyncio.wait_for(self.client.disconnect(), timeout=10)
+            except Exception:
+                pass
+            await asyncio.sleep(2)
 
             self._log_info("[tg-health] 正在重新连接...")
-            await self.client.connect()
+            await asyncio.wait_for(self.client.connect(), timeout=30)
 
             if self.client.is_connected():
                 self._log_info("[tg-health] Telegram 重连成功")

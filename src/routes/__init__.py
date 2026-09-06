@@ -9,6 +9,7 @@ from .download import bp as download_bp
 from .misc import bp as misc_bp
 from .relay import bp as relay_bp
 from .auth import bp as auth_bp
+from .uploader import bp as uploader_bp
 
 __all__ = [
     'files_bp',
@@ -17,5 +18,6 @@ __all__ = [
     'download_bp',
     'misc_bp',
     'relay_bp',
-    'auth_bp'
+    'auth_bp',
+    'uploader_bp',
 ]

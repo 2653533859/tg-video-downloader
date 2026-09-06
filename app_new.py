@@ -46,6 +46,8 @@ from src.routes import (
     system_bp,
     telegram,
     telegram_bp,
+    uploader,
+    uploader_bp,
 )
 
 
@@ -184,6 +186,11 @@ def init_all_blueprints():
         "log_error_func": runtime.log_error,
     })
 
+    uploader.init_blueprint({
+        "upload_manager": runtime.get_upload_manager(),
+        "resolve_download_path": runtime.resolve_current_download_path,
+    })
+
 
 def register_all_blueprints():
     app.register_blueprint(auth_bp)
@@ -193,6 +200,7 @@ def register_all_blueprints():
     app.register_blueprint(download_bp)
     app.register_blueprint(misc_bp)
     app.register_blueprint(relay_bp)
+    app.register_blueprint(uploader_bp)
 
 
 # 编排器存活/就绪探针豁免 Basic Auth：kubelet/Docker HTTP 探针通常不带凭据，

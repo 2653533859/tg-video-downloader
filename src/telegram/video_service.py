@@ -95,7 +95,8 @@ class TelegramVideoService:
         async def scan():
             videos = []
             posts_with_replies = []
-            async for message in self.client.iter_messages(entity, limit=limit):
+            messages = await self.client.get_messages(entity, limit=limit)
+            for message in messages:
                 info = self.video_info_for_message(message, current_entity_id)
                 if info:
                     videos.append(info)

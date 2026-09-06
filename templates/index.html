@@ -131,8 +131,15 @@
         <div class="empty">暂无下载任务</div>
       </div>
       <div id="tabFiles" style="display:none">
-        <div class="loading">
-          <div class="spinner"></div>加载中...
+        <div id="gdriveSummary" style="display:flex;align-items:center;gap:6px;padding:8px 12px;background:#151522;border-bottom:1px solid var(--border);font-size:12px;color:#aaa;">
+          <span style="flex:1" id="gdriveStatusText">云盘：加载中...</span>
+          <button class="btn btn-sm btn-outline" id="gdriveLoginBtn" style="font-size:11px;padding:2px 8px;" onclick="openGDriveLogin()">云盘登录</button>
+          <button class="btn btn-sm btn-outline" id="gdriveTestBtn" style="font-size:11px;padding:2px 8px;" onclick="testGDriveConnection()">测试连通</button>
+        </div>
+        <div id="tabFilesContent">
+          <div class="loading">
+            <div class="spinner"></div>加载中...
+          </div>
         </div>
       </div>
       <div id="tabHistory" style="display:none">
@@ -189,6 +196,55 @@
         <button class="btn" id="tgPasswordBtn" onclick="tgSubmitPassword()" style="width:100%;">提交</button>
       </div>
       <div class="tg-login-msg" id="tgLoginMsg" style="min-height:18px;margin-top:12px;font-size:13px;color:#ff6b6b;"></div>
+    </div>
+
+  <!-- Google Drive 登录/绑定向导 -->
+  <div class="modal-overlay hidden" id="gdriveLoginModal" onclick="closeGDriveLogin(event)">
+    <div class="modal-content" style="max-width:480px;padding:26px;text-align:left;">
+      <button class="modal-close" onclick="closeGDriveLogin()">&times;</button>
+      <h3 style="margin:0 0 4px;color:var(--accent)">绑定 Google 云盘</h3>
+      <div style="font-size:12px;color:#888;margin-bottom:14px;">免繁琐 GCP 配置 · 网页授权绑定</div>
+      
+      <!-- 状态摘要 -->
+      <div id="gdriveModalStatusBox" style="background:#13131e;border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin-bottom:14px;font-size:12px;line-height:1.6;">
+        加载环境状态中...
+      </div>
+
+      <!-- Tab 切换 -->
+      <div style="display:flex;gap:8px;margin-bottom:12px;border-bottom:1px solid var(--border);padding-bottom:6px;">
+        <button type="button" id="gdriveTabBtnToken" class="btn btn-sm" onclick="switchGDriveAuthTab('token')">授权 Token 绑定</button>
+        <button type="button" id="gdriveTabBtnConfig" class="btn btn-sm btn-outline" onclick="switchGDriveAuthTab('config')">粘贴 rclone 配置</button>
+      </div>
+
+      <!-- Tab 1: Token 输入 -->
+      <div id="gdriveAuthTabToken">
+        <div style="font-size:12px;color:#bbb;margin-bottom:8px;">
+          <b>获取 Token 指南：</b><br>
+          在任意装有 rclone 的电脑终端运行：<br>
+          <code style="background:#0a0a10;color:#4ecca3;padding:2px 6px;border-radius:4px;display:inline-block;margin:4px 0;">rclone authorize "drive"</code><br>
+          登录 Google 账号后，复制终端打印出的完整 JSON 串并粘贴在下方：
+        </div>
+        <textarea id="gdriveTokenInput" placeholder='{"access_token":"ya29...","refresh_token":"1//..."}' rows="4"
+          style="width:100%;box-sizing:border-box;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:8px;font-size:12px;font-family:monospace;margin-bottom:10px;"></textarea>
+        
+        <label style="display:block;font-size:12px;color:#aaa;margin-bottom:4px;">团队盘 / 共享云端硬盘 ID (可选)</label>
+        <input id="gdriveTeamDriveInput" placeholder="留空为个人 Google Drive"
+          style="width:100%;box-sizing:border-box;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:6px 10px;font-size:12px;margin-bottom:12px;">
+        
+        <button class="btn" id="gdriveSubmitTokenBtn" onclick="submitGDriveToken()" style="width:100%;">确认绑定并测试连通</button>
+      </div>
+
+      <!-- Tab 2: 完整配置输入 -->
+      <div id="gdriveAuthTabConfig" style="display:none">
+        <div style="font-size:12px;color:#bbb;margin-bottom:8px;">
+          直接粘贴已有的 <code>rclone.conf</code> 配置内容：
+        </div>
+        <textarea id="gdriveRawConfigInput" placeholder="[gdrive]&#10;type = drive&#10;scope = drive&#10;token = {...}" rows="7"
+          style="width:100%;box-sizing:border-box;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:8px;font-size:12px;font-family:monospace;margin-bottom:12px;"></textarea>
+        <button class="btn" id="gdriveSubmitConfigBtn" onclick="submitGDriveRawConfig()" style="width:100%;">保存配置</button>
+      </div>
+
+      <div id="gdriveLoginMsg" style="min-height:18px;margin-top:10px;font-size:12px;color:#ff6b6b;"></div>
     </div>
   </div>
 

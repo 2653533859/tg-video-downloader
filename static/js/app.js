@@ -571,7 +571,7 @@ let currentEntity = null;
     }
 
     let renderedCount = 0;
-    const CHUNK_SIZE = 100;
+    const CHUNK_SIZE = 24;
     let listObserver = null;
 
     function renderVideoList() {
@@ -1303,10 +1303,32 @@ let currentEntity = null;
     }
 
     function loadFiles(page = 1) {
-      fetch('/api/files?page=' + encodeURIComponent(page) + '&per_page=100').then(r => r.json()).then(payload => {
+      Promise.all([
+        fetch('/api/files?page=' + encodeURIComponent(page) + '&per_page=100').then(r => r.json()).catch(() => ({ files: [] })),
+        fetch('/api/gdrive/status').then(r => r.json()).catch(() => null),
+      ]).then(([payload, gdriveStatus]) => {
+        const targetContainer = document.getElementById('tabFilesContent') || document.getElementById('tabFiles');
         const data = Array.isArray(payload) ? payload : (payload.files || []);
         filesPage = Array.isArray(payload) ? 1 : (payload.page || 1);
-        if (!data.length) { document.getElementById('tabFiles').innerHTML = '<div class="empty">暂无已下载文件</div>'; return; }
+
+        updateGDriveSummary(gdriveStatus);
+
+        const gdriveMap = {};
+        if (gdriveStatus) {
+          if (gdriveStatus.current) {
+            const cur = gdriveStatus.current;
+            gdriveMap[`${cur.folder}/${cur.filename}`] = cur;
+          }
+          (gdriveStatus.queue || []).forEach(t => {
+            gdriveMap[`${t.folder}/${t.filename}`] = t;
+          });
+          (gdriveStatus.recent || []).forEach(t => {
+            const k = `${t.folder}/${t.filename}`;
+            if (!gdriveMap[k]) gdriveMap[k] = t;
+          });
+        }
+
+        if (!data.length) { targetContainer.innerHTML = '<div class="empty">暂无已下载文件</div>'; return; }
         let html = data.map(f => {
           const dlUrl = '/api/file/' + encodeURIComponent(f.folder) + '/' + encodeURIComponent(f.filename);
           const playable = f.playable !== false;
@@ -1315,6 +1337,27 @@ let currentEntity = null;
           const playButton = playable
             ? `<button type="button" class="btn-dl" onclick="previewFileFromItem(this.closest('.file-item'))">播放</button>`
             : `<button type="button" class="btn-dl" disabled title="${esc(playReason)}">下载中</button>`;
+
+          const fileKey = `${f.folder}/${f.filename}`;
+          const gTask = gdriveMap[fileKey];
+          let gdriveBtn = '';
+          if (gTask) {
+            if (gTask.status === 'uploading') {
+              const spd = gTask.speed ? ` · ${esc(gTask.speed)}` : '';
+              gdriveBtn = `<button type="button" class="btn-dl" style="color:var(--accent)" disabled title="上传中">云盘 ${gTask.progress}%${spd}</button>`;
+            } else if (gTask.status === 'pending') {
+              gdriveBtn = `<button type="button" class="btn-dl" style="color:#aaa" disabled title="排队中">云盘排队</button>`;
+            } else if (gTask.status === 'done') {
+              gdriveBtn = `<button type="button" class="btn-dl" style="color:#4ecca3" disabled title="已保存到 Google 云盘">已存云盘 ✓</button>`;
+            } else if (gTask.status === 'error') {
+              gdriveBtn = `<button type="button" class="btn-dl btn-dl-danger" onclick="retryGDriveUpload('${esc(gTask.upload_id)}')" title="${esc(gTask.error)}">重试云盘</button>`;
+            } else {
+              gdriveBtn = `<button type="button" class="btn-dl" onclick="uploadToGDrive(this.closest('.file-item'))">存云盘</button>`;
+            }
+          } else {
+            gdriveBtn = `<button type="button" class="btn-dl" onclick="uploadToGDrive(this.closest('.file-item'))">存云盘</button>`;
+          }
+
           return `<div class="file-item" data-folder="${esc(f.folder)}" data-filename="${esc(f.filename)}" data-playable="${playable ? '1' : '0'}" data-play-reason="${esc(playReason)}" oncontextmenu="showFileContextMenu(event,this)">
         <div class="file-info">
           <div class="fname" title="${esc(f.folder)}/${esc(f.filename)}" onclick="previewFileFromItem(this.closest('.file-item'))"><span class="folder">${esc(f.folder)}/</span> ${esc(f.filename)}</div>
@@ -1324,6 +1367,7 @@ let currentEntity = null;
           <button type="button" class="btn-dl" onclick="openFolderFromItem(this.closest('.file-item'))">目录</button>
           ${playButton}
           <a class="btn-dl" href="${dlUrl}" download="${esc(f.filename)}">下载</a>
+          ${gdriveBtn}
           <button type="button" class="btn-dl btn-dl-danger" onclick="deleteFileFromItem(this.closest('.file-item'))">删除</button>
         </div>
       </div>`;
@@ -1337,8 +1381,200 @@ let currentEntity = null;
             <button class="btn btn-sm btn-outline" ${filesPage >= pages ? 'disabled' : ''} onclick="loadFiles(${filesPage + 1})">下一页</button>
           </div>`;
         }
-        document.getElementById('tabFiles').innerHTML = html;
+        targetContainer.innerHTML = html;
       });
+    }
+
+    function updateGDriveSummary(status) {
+      const el = document.getElementById('gdriveStatusText');
+      if (!el) return;
+      if (!status) {
+        el.textContent = 'Google 云盘：未连接';
+        return;
+      }
+      if (!status.enabled) {
+        el.innerHTML = '<span style="color:#888">云盘转存：未启用 (可在 .env 设置 GDRIVE_ENABLED=true 开启)</span>';
+        return;
+      }
+      const remote = status.remote || 'gdrive';
+      const dir = status.target_dir || '';
+      const targetStr = dir ? `${remote}:${dir}` : `${remote}:`;
+      const qCount = status.queue_count || 0;
+      let activeText = '';
+      if (status.current) {
+        activeText = ` · 正在上传 ${esc(status.current.filename)} (${status.current.progress}%)`;
+      } else {
+        activeText = ' · 空闲';
+      }
+      el.innerHTML = `<span style="color:#4ecca3">●</span> 云盘目标: <b>${esc(targetStr)}</b> · 排队 ${qCount}${activeText}`;
+    }
+
+    function uploadToGDrive(item) {
+      const { folder, filename } = fileDataFromItem(item);
+      if (!folder || !filename) return;
+      fetch('/api/gdrive/upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folder, filename }),
+      }).then(r => r.json()).then(res => {
+        if (!res.ok) {
+          alert(res.error || '加入上传队列失败');
+        } else {
+          loadFiles(filesPage);
+        }
+      }).catch(err => alert('请求失败: ' + err.message));
+    }
+
+    function retryGDriveUpload(uploadId) {
+      if (!uploadId) return;
+      fetch('/api/gdrive/retry', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ upload_id: uploadId }),
+      }).then(r => r.json()).then(res => {
+        if (!res.ok) {
+          alert(res.error || '重试失败');
+        } else {
+          loadFiles(filesPage);
+        }
+      }).catch(err => alert('请求失败: ' + err.message));
+    }
+
+    function testGDriveConnection() {
+      const btn = document.getElementById('gdriveTestBtn');
+      if (btn) { btn.disabled = true; btn.textContent = '测试中...'; }
+      fetch('/api/gdrive/test').then(r => r.json()).then(res => {
+        alert((res.ok ? '✅ ' : '❌ ') + (res.message || '测试完成'));
+        loadFiles(filesPage);
+      }).catch(err => {
+        alert('测试请求异常: ' + err.message);
+      }).finally(() => {
+        if (btn) { btn.disabled = false; btn.textContent = '测试连通'; }
+      });
+    }
+
+    function openGDriveLogin() {
+      const modal = document.getElementById('gdriveLoginModal');
+      if (modal) {
+        modal.classList.remove('hidden');
+        loadGDriveAuthInfo();
+      }
+    }
+
+    function closeGDriveLogin(e) {
+      if (e && e.target && !e.target.classList.contains('modal-overlay') && !e.target.classList.contains('modal-close')) {
+        return;
+      }
+      const modal = document.getElementById('gdriveLoginModal');
+      if (modal) modal.classList.add('hidden');
+      const msg = document.getElementById('gdriveLoginMsg');
+      if (msg) msg.textContent = '';
+    }
+
+    function switchGDriveAuthTab(tab) {
+      const isToken = tab === 'token';
+      document.getElementById('gdriveAuthTabToken').style.display = isToken ? '' : 'none';
+      document.getElementById('gdriveAuthTabConfig').style.display = isToken ? 'none' : '';
+      document.getElementById('gdriveTabBtnToken').className = isToken ? 'btn btn-sm' : 'btn btn-sm btn-outline';
+      document.getElementById('gdriveTabBtnConfig').className = isToken ? 'btn btn-sm btn-outline' : 'btn btn-sm';
+    }
+
+    function loadGDriveAuthInfo() {
+      const box = document.getElementById('gdriveModalStatusBox');
+      if (!box) return;
+      box.innerHTML = '正在检查 rclone 及云盘授权状态...';
+      fetch('/api/gdrive/auth/info').then(r => r.json()).then(info => {
+        const instHtml = info.installed
+          ? '<span style="color:#4ecca3">● 已安装 rclone (' + esc(info.binary_path || 'rclone') + ')</span>'
+          : '<span style="color:#ff6b6b">● 未安装 rclone 二进制</span> (请在宿主或容器安装: <code>curl https://rclone.org/install.sh | sudo bash</code>)';
+        
+        let cfgHtml = '';
+        if (info.configured) {
+          const exp = info.token_expiry ? ' (过期时间: ' + esc(info.token_expiry) + ')' : '';
+          cfgHtml = `<div><b>当前绑定:</b> <span style="color:#4ecca3">已配置 remote '${esc(info.remote_name)}'</span>${exp} <button class="btn btn-sm btn-danger" style="padding:1px 6px;font-size:10px;margin-left:8px;" onclick="unbindGDrive()">解绑</button></div>`;
+        } else {
+          cfgHtml = `<div><b>当前绑定:</b> <span style="color:#f39c12">未配置</span> (请在下方粘贴 Token 完成绑定)</div>`;
+        }
+        box.innerHTML = `<div><b>环境状态:</b> ${instHtml}</div>${cfgHtml}<div style="color:#888;font-size:11px;margin-top:4px;">配置文件: ${esc(info.config_path)}</div>`;
+      }).catch(err => {
+        box.innerHTML = '<span style="color:#ff6b6b">获取配置状态失败: ' + esc(err.message) + '</span>';
+      });
+    }
+
+    function submitGDriveToken() {
+      const token = (document.getElementById('gdriveTokenInput')?.value || '').trim();
+      const teamDrive = (document.getElementById('gdriveTeamDriveInput')?.value || '').trim();
+      const msg = document.getElementById('gdriveLoginMsg');
+      const btn = document.getElementById('gdriveSubmitTokenBtn');
+      if (!token) {
+        if (msg) msg.textContent = '请先粘贴包含 access_token / refresh_token 的 JSON 字符串';
+        return;
+      }
+      if (btn) { btn.disabled = true; btn.textContent = '保存并测试连接中...'; }
+      if (msg) msg.textContent = '';
+
+      fetch('/api/gdrive/auth/save_token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: token, team_drive: teamDrive }),
+      }).then(r => r.json()).then(res => {
+        if (!res.ok) {
+          throw new Error(res.error || '保存失败');
+        }
+        // Auto test connection
+        return fetch('/api/gdrive/test').then(tr => tr.json());
+      }).then(testRes => {
+        if (testRes.ok) {
+          alert('✅ Google 云盘绑定并连接成功！');
+          closeGDriveLogin();
+          loadFiles(filesPage);
+        } else {
+          if (msg) msg.innerHTML = '<span style="color:#f39c12">凭据已保存，但连接测试未通过: ' + esc(testRes.message) + '</span>';
+          loadGDriveAuthInfo();
+        }
+      }).catch(err => {
+        if (msg) msg.textContent = '错误: ' + err.message;
+      }).finally(() => {
+        if (btn) { btn.disabled = false; btn.textContent = '确认绑定并测试连通'; }
+      });
+    }
+
+    function submitGDriveRawConfig() {
+      const content = (document.getElementById('gdriveRawConfigInput')?.value || '').trim();
+      const msg = document.getElementById('gdriveLoginMsg');
+      const btn = document.getElementById('gdriveSubmitConfigBtn');
+      if (!content) {
+        if (msg) msg.textContent = '配置内容不能为空';
+        return;
+      }
+      if (btn) { btn.disabled = true; btn.textContent = '保存中...'; }
+      fetch('/api/gdrive/auth/save_config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: content }),
+      }).then(r => r.json()).then(res => {
+        if (!res.ok) throw new Error(res.error || '保存失败');
+        alert('✅ rclone.conf 配置已更新！');
+        loadGDriveAuthInfo();
+        loadFiles(filesPage);
+      }).catch(err => {
+        if (msg) msg.textContent = '错误: ' + err.message;
+      }).finally(() => {
+        if (btn) { btn.disabled = false; btn.textContent = '保存配置'; }
+      });
+    }
+
+    function unbindGDrive() {
+      if (!confirm('确定要解绑当前 Google Drive 远程配置吗？')) return;
+      fetch('/api/gdrive/auth/unbind', { method: 'POST' }).then(r => r.json()).then(res => {
+        if (res.ok) {
+          alert('已解绑');
+          loadGDriveAuthInfo();
+          loadFiles(filesPage);
+        } else {
+          alert(res.error || '解绑失败');
+        }
+      }).catch(err => alert('解绑异常: ' + err.message));
     }
 
     let ctxMenuTarget = null;

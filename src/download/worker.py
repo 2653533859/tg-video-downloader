@@ -25,6 +25,7 @@ class DownloadWorker:
         format_size,
         log_info,
         log_error,
+        on_download_complete=None,
     ):
         self.download_dir_for_dialog = download_dir_for_dialog
         self.release_tasks = release_tasks
@@ -43,7 +44,7 @@ class DownloadWorker:
         self.format_size = format_size
         self.log_info = log_info
         self.log_error = log_error
-
+        self.on_download_complete = on_download_complete
     def run(self, task_items, dialog_name):
         try:
             save_dir = self.download_dir_for_dialog(dialog_name)
@@ -96,6 +97,7 @@ class DownloadWorker:
 
         filepath = os.path.join(save_dir, info["filename"])
         if self._skip_existing(task_id, entity_id, msg_id, dialog_name, info, filepath):
+            self._notify_download_complete(task_id, filepath, dialog_name, info)
             return
 
         downloader = task.get("downloader")
@@ -109,15 +111,19 @@ class DownloadWorker:
             self._run_telegram(task_id, entity_id, msg_id, dialog_name, info, filepath)
             return
 
-        self.tdl_executor().download(
-            task_id,
-            entity_id,
-            msg_id,
-            dialog_name,
-            info,
-            filepath,
-            save_dir,
-        )
+        try:
+            self.tdl_executor().download(
+                task_id,
+                entity_id,
+                msg_id,
+                dialog_name,
+                info,
+                filepath,
+                save_dir,
+            )
+            self._notify_download_complete(task_id, filepath, dialog_name, info)
+        except Exception:
+            raise
 
     def _resolve_info(self, task, task_id, entity_id, msg_id):
         info = task.get("info")
@@ -167,6 +173,7 @@ class DownloadWorker:
         total_bytes = info.get("size") or 0
         try:
             self.download_with_telegram(task_id, entity_id, msg_id, dialog_name, info, filepath)
+            self._notify_download_complete(task_id, filepath, dialog_name, info)
         except Exception as exc:
             err = str(exc)
             self.log_error(f"下载失败 [{task_id}] {info.get('filename','?')}: {err}")
@@ -180,6 +187,19 @@ class DownloadWorker:
                 if cur_file_size > 0:
                     self._save_resume(task_id, filepath, info, cur_file_size, total_bytes, entity_id, msg_id, dialog_name)
             self.update_task_state(task_id, speed="", speed_bps=0.0, queue_position=None, queue_size=0)
+
+    def _notify_download_complete(self, task_id, filepath, dialog_name, info):
+        if not self.on_download_complete or not callable(self.on_download_complete):
+            return
+        try:
+            self.on_download_complete(
+                task_id=task_id,
+                filepath=filepath,
+                dialog_name=dialog_name,
+                filename=info.get("filename", "") if isinstance(info, dict) else "",
+            )
+        except Exception as exc:
+            self.log_error(f"[{task_id}] 执行下载完成钩子异常: {exc}")
 
     def _save_resume(self, task_id, filepath, info, offset, total_bytes, entity_id, msg_id, dialog_name):
         self.save_resume_info(task_id, {

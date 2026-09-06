@@ -115,3 +115,14 @@ TDL_STORAGE_PATH = os.getenv("TDL_STORAGE_PATH", "/root/.tdl/data").strip() or "
 TDL_THREADS = int(os.getenv("TDL_THREADS", "8") or "8")
 TDL_LIMIT = int(os.getenv("TDL_LIMIT", "4") or "4")
 TDL_CHAT_ID_OVERRIDES = os.getenv("TDL_CHAT_ID_OVERRIDES", "").strip()
+
+# Google Drive / rclone 配置
+GDRIVE_ENABLED = _strtobool(os.getenv("GDRIVE_ENABLED"), default=False)
+GDRIVE_RCLONE_BINARY = os.getenv("GDRIVE_RCLONE_BINARY", "rclone").strip() or "rclone"
+GDRIVE_RCLONE_CONFIG = os.getenv("GDRIVE_RCLONE_CONFIG", "").strip()
+GDRIVE_RCLONE_REMOTE = os.getenv("GDRIVE_RCLONE_REMOTE", "gdrive").strip() or "gdrive"
+GDRIVE_TARGET_DIR = os.getenv("GDRIVE_TARGET_DIR", "TG_Downloads").strip() or "TG_Downloads"
+GDRIVE_AUTO_UPLOAD = _strtobool(os.getenv("GDRIVE_AUTO_UPLOAD"), default=False)
+GDRIVE_DELETE_LOCAL_AFTER_UPLOAD = _strtobool(os.getenv("GDRIVE_DELETE_LOCAL_AFTER_UPLOAD"), default=False)
+GDRIVE_MAX_CONCURRENT_UPLOADS = int(os.getenv("GDRIVE_MAX_CONCURRENT_UPLOADS", "1") or "1")
+GDRIVE_BWLIMIT = os.getenv("GDRIVE_BWLIMIT", "").strip()

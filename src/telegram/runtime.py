@@ -243,10 +243,8 @@ class TelegramRuntime:
 
     async def collect_dialogs(self):
         dialogs = []
-        async for dialog in self.client.iter_dialogs():
+        async for dialog in self.client.iter_dialogs(limit=min(self.dialog_fetch_max, 500)):
             dialogs.append(dialog)
-            if len(dialogs) >= self.dialog_fetch_max:
-                break
         return dialogs
 
     def refresh_dialogs_cache(self):
@@ -259,7 +257,7 @@ class TelegramRuntime:
                 self.dialogs_serialized_cache[:] = serialized
                 self.dialogs_cache_updated_at = time.time()
                 self.dialogs_refresh_error = ""
-        except TimeoutError:
+        except (TimeoutError, FutureTimeoutError):
             self.set_dialogs_refresh_error("加载对话列表超时，请稍后重试")
         except Exception as exc:
             self.set_dialogs_refresh_error(str(exc) or "加载对话列表失败")
@@ -276,7 +274,13 @@ class TelegramRuntime:
                 and (time.time() - self.dialogs_cache_updated_at) < self.max_dialog_cache_age
             )
             if self.dialogs_refresh_in_progress:
-                return False
+                now = time.time()
+                stalled = self.dialogs_refresh_started_at and (now - self.dialogs_refresh_started_at) > 120
+                force_recover = force and (now - self.dialogs_refresh_started_at) > 10
+                if stalled or force_recover:
+                    self.dialogs_refresh_in_progress = False
+                else:
+                    return False
             if not force and cache_fresh and not self.dialogs_refresh_error:
                 return False
             self.dialogs_refresh_in_progress = True

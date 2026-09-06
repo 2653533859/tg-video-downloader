@@ -282,22 +282,36 @@ def api_thumb(msg_id):
     thumb_path = thumbnail_cache_path(_THUMB_DIR, entity_id, msg_id)
 
     if os.path.exists(thumb_path):
-        return send_file(thumb_path, mimetype="image/jpeg")
+        resp = send_file(thumb_path, mimetype="image/jpeg")
+        resp.headers["Cache-Control"] = "public, max-age=604800, immutable"
+        return resp
 
     message = _get_cached_message(msg_id, entity_id)
     if not message:
-        return Response(status=404)
+        resp = Response(status=404)
+        resp.headers["Cache-Control"] = "public, max-age=60"
+        return resp
 
     try:
-        data = _run_async(lambda: _tg_client.download_media(message, file=bytes, thumb=-1), allow_reconnect=False)
+        data = _run_async(
+            lambda: _tg_client.download_media(message, file=bytes, thumb=-1),
+            timeout=8,
+            allow_reconnect=False
+        )
         if not data:
-            return Response(status=404)
+            resp = Response(status=404)
+            resp.headers["Cache-Control"] = "public, max-age=60"
+            return resp
 
         write_thumbnail(_THUMB_DIR, entity_id, msg_id, data)
 
-        return Response(data, mimetype="image/jpeg")
+        resp = Response(data, mimetype="image/jpeg")
+        resp.headers["Cache-Control"] = "public, max-age=604800, immutable"
+        return resp
     except Exception:
-        return Response(status=404)
+        resp = Response(status=404)
+        resp.headers["Cache-Control"] = "public, max-age=30"
+        return resp
 
 
 @bp.route("/api/online-play-url")

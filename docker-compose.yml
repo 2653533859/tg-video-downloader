@@ -10,7 +10,11 @@ services:
       - .:/app  # 映射当前目录以持久化 session 文件
       - /usr/local/bin/tdl:/usr/local/bin/tdl:ro
       - /root/.tdl:/root/.tdl
+      # 可选：开启 Google Drive 上传时，挂载宿主机的 rclone 及配置
+      # - /usr/bin/rclone:/usr/bin/rclone:ro
+      # - /root/.config/rclone:/root/.config/rclone:ro
     environment:
+      - PYTHONUNBUFFERED=1
       - TG_API_ID=${TG_API_ID}
       - TG_API_HASH=${TG_API_HASH}
       - DOWNLOAD_DIR=downloads
@@ -32,6 +36,15 @@ services:
       - HTTP_PROXY=${HTTP_PROXY:-http://127.0.0.1:7890}
       - HTTPS_PROXY=${HTTPS_PROXY:-http://127.0.0.1:7890}
       - ALL_PROXY=${ALL_PROXY:-http://127.0.0.1:7890}
+      # 可选：Google Drive / rclone 配置
+      - GDRIVE_ENABLED=${GDRIVE_ENABLED:-false}
+      - GDRIVE_RCLONE_BINARY=${GDRIVE_RCLONE_BINARY:-rclone}
+      - GDRIVE_RCLONE_CONFIG=${GDRIVE_RCLONE_CONFIG:-}
+      - GDRIVE_RCLONE_REMOTE=${GDRIVE_RCLONE_REMOTE:-gdrive}
+      - GDRIVE_TARGET_DIR=${GDRIVE_TARGET_DIR:-TG_Downloads}
+      - GDRIVE_AUTO_UPLOAD=${GDRIVE_AUTO_UPLOAD:-false}
+      - GDRIVE_DELETE_LOCAL_AFTER_UPLOAD=${GDRIVE_DELETE_LOCAL_AFTER_UPLOAD:-false}
+      - GDRIVE_BWLIMIT=${GDRIVE_BWLIMIT:-}
     restart: unless-stopped
     # 运行身份与 capabilities（二者关联，配置前务必读）。端口 5003 > 1024，无需 NET_BIND_SERVICE。
     security_opt:
