@@ -1466,11 +1466,11 @@ let currentEntity = null;
           if (gTask) {
             if (gTask.status === 'uploading') {
               const spd = gTask.speed ? ` · ${esc(gTask.speed)}` : '';
-              gdriveBtn = `<button type="button" class="btn-dl btn-gdrive" style="color:var(--accent)" disabled title="上传中">云盘 ${gTask.progress}%${spd}</button>`;
+              gdriveBtn = `<button type="button" class="btn-dl btn-gdrive btn-gdrive-uploading" disabled title="上传中">云盘 ${gTask.progress}%${spd}</button>`;
             } else if (gTask.status === 'pending') {
-              gdriveBtn = `<button type="button" class="btn-dl btn-gdrive" style="color:#aaa" disabled title="排队中">云盘排队</button>`;
+              gdriveBtn = `<button type="button" class="btn-dl btn-gdrive btn-gdrive-pending" disabled title="排队中">云盘排队</button>`;
             } else if (gTask.status === 'done') {
-              gdriveBtn = `<button type="button" class="btn-dl btn-gdrive" style="color:#4ecca3" disabled title="已保存到 Google 云盘">已存云盘 ✓</button>`;
+              gdriveBtn = `<button type="button" class="btn-dl btn-gdrive btn-gdrive-done" disabled title="已保存到 Google 云盘">已存云盘 ✓</button>`;
             } else if (gTask.status === 'error') {
               gdriveBtn = `<button type="button" class="btn-dl btn-dl-danger btn-gdrive" onclick="retryGDriveUpload('${esc(gTask.upload_id)}')" title="${esc(gTask.error)}">重试云盘</button>`;
             } else {
@@ -1481,7 +1481,7 @@ let currentEntity = null;
           }
 
           const playBtn = playable
-            ? `<button type="button" class="btn-dl" onclick="previewFile('${esc(f.folder)}', '${esc(f.filename)}')">播放</button>`
+            ? `<button type="button" class="btn-dl btn-play-main" onclick="previewFile('${esc(f.folder)}', '${esc(f.filename)}')">▶ 播放</button>`
             : `<button type="button" class="btn-dl" disabled title="${esc(playReason)}">下载中</button>`;
 
           return `<div class="file-card" data-folder="${esc(f.folder)}" data-filename="${esc(f.filename)}">
@@ -1521,11 +1521,11 @@ let currentEntity = null;
           if (gTask) {
             if (gTask.status === 'uploading') {
               const spd = gTask.speed ? ` · ${esc(gTask.speed)}` : '';
-              gdriveBtn = `<button type="button" class="btn-dl btn-gdrive" style="color:var(--accent)" disabled title="上传中">云盘 ${gTask.progress}%${spd}</button>`;
+              gdriveBtn = `<button type="button" class="btn-dl btn-gdrive btn-gdrive-uploading" disabled title="上传中">云盘 ${gTask.progress}%${spd}</button>`;
             } else if (gTask.status === 'pending') {
-              gdriveBtn = `<button type="button" class="btn-dl btn-gdrive" style="color:#aaa" disabled title="排队中">云盘排队</button>`;
+              gdriveBtn = `<button type="button" class="btn-dl btn-gdrive btn-gdrive-pending" disabled title="排队中">云盘排队</button>`;
             } else if (gTask.status === 'done') {
-              gdriveBtn = `<button type="button" class="btn-dl btn-gdrive" style="color:#4ecca3" disabled title="已保存到 Google 云盘">已存云盘 ✓</button>`;
+              gdriveBtn = `<button type="button" class="btn-dl btn-gdrive btn-gdrive-done" disabled title="已保存到 Google 云盘">已存云盘 ✓</button>`;
             } else if (gTask.status === 'error') {
               gdriveBtn = `<button type="button" class="btn-dl btn-dl-danger btn-gdrive" onclick="retryGDriveUpload('${esc(gTask.upload_id)}')" title="${esc(gTask.error)}">重试云盘</button>`;
             } else {
@@ -1536,23 +1536,29 @@ let currentEntity = null;
           }
 
           const playBtn = playable
-            ? `<button type="button" class="btn-dl" onclick="previewFile('${esc(f.folder)}', '${esc(f.filename)}')">播放</button>`
+            ? `<button type="button" class="btn-dl btn-play-main" onclick="previewFile('${esc(f.folder)}', '${esc(f.filename)}')">▶ 播放</button>`
             : `<button type="button" class="btn-dl" disabled title="${esc(playReason)}">下载中</button>`;
 
           return `<div class="file-item" data-folder="${esc(f.folder)}" data-filename="${esc(f.filename)}" data-playable="${playable ? '1' : '0'}" oncontextmenu="showFileContextMenu(event,this)">
-            <div class="file-item-thumb" onclick="previewFile('${esc(f.folder)}', '${esc(f.filename)}')">
-              <video preload="metadata" muted playsinline src="${streamUrl}#t=1.0"></video>
+            <div class="file-item-thumb" onclick="previewFile('${esc(f.folder)}', '${esc(f.filename)}')" onmouseenter="handlePosterHover(this, true)" onmouseleave="handlePosterHover(this, false)">
+              <video preload="metadata" muted playsinline loop src="${streamUrl}#t=1.0"></video>
+              <div class="file-item-play-overlay">▶</div>
+              <div class="file-item-size-badge">${esc(f.size)}</div>
             </div>
-            <div class="file-info" style="margin-left:8px;">
-              <div class="fname" title="${esc(f.folder)}/${esc(f.filename)}" onclick="previewFile('${esc(f.folder)}', '${esc(f.filename)}')"><span class="folder">${esc(f.folder)}/</span> ${esc(f.filename)}</div>
-              <div class="meta">${esc(f.size)} · ${esc(f.modified)}${statusText}</div>
+            <div class="file-info">
+              <div class="file-meta-row">
+                <span class="file-folder-badge" title="${esc(f.folder)}">${esc(f.folder)}</span>
+                <span>${esc(f.modified)}</span>
+                ${!playable && playReason ? `<span style="color:#f39c12"> · 下载中</span>` : ''}
+              </div>
+              <div class="fname" title="${esc(f.filename)}" onclick="previewFile('${esc(f.folder)}', '${esc(f.filename)}')">${esc(f.filename)}</div>
             </div>
             <div class="file-btns">
-              <button type="button" class="btn-dl" onclick="openFolder('${esc(f.folder)}')">目录</button>
               ${playBtn}
-              <a class="btn-dl" href="${dlUrl}" download="${esc(f.filename)}">下载</a>
               ${gdriveBtn}
-              <button type="button" class="btn-dl btn-dl-danger" onclick="deleteFile('${esc(f.folder)}', '${esc(f.filename)}')">删除</button>
+              <a class="btn-dl" href="${dlUrl}" download="${esc(f.filename)}" title="下载到电脑">下载</a>
+              <button type="button" class="btn-dl" onclick="openFolder('${esc(f.folder)}')" title="打开服务器本地目录">目录</button>
+              <button type="button" class="btn-dl btn-dl-danger" onclick="deleteFile('${esc(f.folder)}', '${esc(f.filename)}')" title="删除本地文件">删除</button>
             </div>
           </div>`;
         }).join('');
@@ -1655,21 +1661,21 @@ let currentEntity = null;
             const spd = t.speed ? ` · ${t.speed}` : '';
             btn.textContent = `云盘 ${t.progress}%${spd}`;
             btn.style.color = 'var(--accent)';
-            btn.className = 'btn-dl btn-gdrive';
+            btn.className = 'btn-dl btn-gdrive btn-gdrive-uploading';
             btn.disabled = true;
             btn.title = '上传中';
             btn.onclick = null;
           } else if (t.status === 'pending') {
             btn.textContent = '云盘排队';
             btn.style.color = '#aaa';
-            btn.className = 'btn-dl btn-gdrive';
+            btn.className = 'btn-dl btn-gdrive btn-gdrive-pending';
             btn.disabled = true;
             btn.title = '排队中';
             btn.onclick = null;
           } else if (t.status === 'done') {
             btn.textContent = '已存云盘 ✓';
             btn.style.color = '#4ecca3';
-            btn.className = 'btn-dl btn-gdrive';
+            btn.className = 'btn-dl btn-gdrive btn-gdrive-done';
             btn.disabled = true;
             btn.title = '已保存到 Google 云盘';
             btn.onclick = null;
