@@ -1218,8 +1218,10 @@ let currentEntity = null;
       const modal = document.getElementById('previewModal');
       const titleEl = document.getElementById('previewTitle');
       if (titleEl) titleEl.textContent = title;
+      const dlBtn = document.getElementById('previewDownloadBtn');
+      if (dlBtn) dlBtn.href = url;
+      window.__currentPreviewUrl = url;
       if (modal) modal.classList.remove('hidden');
-
       if (artplayerInstance) {
         try { artplayerInstance.destroy(false); } catch (e) {}
         artplayerInstance = null;
@@ -1321,6 +1323,18 @@ let currentEntity = null;
       const container = document.getElementById('artplayerContainer');
       if (container) container.innerHTML = '';
     }
+    window.copyStreamUrl = function() {
+      const fullUrl = window.location.origin + (window.__currentPreviewUrl || '');
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(fullUrl).then(() => {
+          alert('已复制流地址到剪贴板！\n可在 VLC / IINA / PotPlayer 等播放器中直接粘贴播放(千兆局域网硬解零延迟):\n' + fullUrl);
+        }).catch(() => {
+          prompt('请手动复制流地址：', fullUrl);
+        });
+      } else {
+        prompt('请手动复制流地址：', fullUrl);
+      }
+    };
 
     document.addEventListener('keydown', e => { if (e.key === 'Escape') closePreview(); });
 

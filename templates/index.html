@@ -183,7 +183,13 @@
     <div class="modal-content" style="max-width:1040px;width:92vw;padding:0;background:transparent;border:none;box-shadow:none;">
       <button class="modal-close" onclick="closePreview()">&times;</button>
       <div id="artplayerContainer" style="width:100%;height:58vh;min-height:380px;max-height:82vh;border-radius:12px;overflow:hidden;box-shadow:0 16px 48px rgba(0,0,0,0.85);background:#000;"></div>
-      <div class="modal-title" id="previewTitle" style="padding:10px 4px;font-size:14px;color:#eee;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 4px;flex-wrap:wrap;gap:8px;">
+        <div class="modal-title" id="previewTitle" style="font-size:14px;color:#eee;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:55%;"></div>
+        <div style="display:flex;gap:8px;">
+          <a id="previewDownloadBtn" class="btn btn-sm btn-outline" href="#" target="_blank" style="padding:4px 10px;font-size:12px;text-decoration:none;">⬇️ 下载原文件</a>
+          <button id="previewCopyUrlBtn" class="btn btn-sm btn-outline" onclick="copyStreamUrl()" style="padding:4px 10px;font-size:12px;">📋 复制流地址(VLC/IINA)</button>
+        </div>
+      </div>
     </div>
   </div>
 

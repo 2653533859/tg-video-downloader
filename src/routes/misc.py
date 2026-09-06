@@ -159,9 +159,11 @@ def api_stream(filepath):
         print(f"[STREAM-REQ] {request.remote_addr} | Range: {range_hdr} | Ref: {referer} | UA: {user_agent[:40]} | {os.path.basename(filepath)}", flush=True)
         # 核心优化：启用 4MB 动态步长流式分块，杜绝浏览器大范围请求被强行 Abort 的风暴
         if range_hdr:
-            stream_range = local_stream_range(file_size, range_hdr, chunk_size=4 * 1024 * 1024)
+            # 起播阶段（bytes=0-）给予 16MB 极速缓冲窗口，快速填满解码器与元数据；拖拽阶段给予 8MB 平滑窗口
+            req_chunk = 16 * 1024 * 1024 if range_hdr.startswith("bytes=0-") else 8 * 1024 * 1024
+            stream_range = local_stream_range(file_size, range_hdr, chunk_size=req_chunk)
             resp = Response(
-                iter_file_chunks(full_path, stream_range["start"], stream_range["content_length"], chunk_size=262144),
+                iter_file_chunks(full_path, stream_range["start"], stream_range["content_length"], chunk_size=524288),
                 status=206,
                 mimetype=mime_type,
                 direct_passthrough=True,
