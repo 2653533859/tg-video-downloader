@@ -247,27 +247,35 @@ def api_retry():
     if not state:
         return jsonify({"error": "任务不存在"}), 404
 
-    # 重置状态并重新加入队列
-    _update_task_state(
-        task_id,
-        status="submitting",
-        progress=0,
-        error="",
-        speed="",
-        speed_bps=0.0,
-        queue_position=None,
-        queue_size=0,
-    )
+    # 重置状态并重新加入队列（重试属于终态复活，必须使用 _set_task_state 允许 allow_revive）
+    new_state = dict(state)
+    new_state.update({
+        "status": "submitting",
+        "progress": state.get("progress", 0),
+        "error": "",
+        "speed": "",
+        "speed_bps": 0.0,
+        "queue_position": None,
+        "queue_size": 0,
+        "updated_at": time.time(),
+    })
+    _set_task_state(task_id, new_state)
 
     _clear_download_cancelled(task_id)
 
     try:
-        # 重新加入下载队列
+        # 重新加入下载队列，附带已知有效元数据以便断点续传
         entity_id = state.get("entity_id")
         msg_id = state.get("msg_id")
         dialog_name = state.get("dialog_name", "unknown")
 
-        _enqueue_download(task_id, entity_id, msg_id, dialog_name, None)
+        info = {
+            "filename": state.get("filename"),
+            "size": state.get("total_bytes") or state.get("size_bytes") or 0,
+            "document_id": state.get("document_id"),
+        } if state.get("filename") else None
+
+        _enqueue_download(task_id, entity_id, msg_id, dialog_name, info)
 
         return jsonify({"status": "retrying", "task_id": task_id})
     except Exception as exc:

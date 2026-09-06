@@ -131,14 +131,36 @@ class DownloadWorker:
             return info
 
         message = self.get_cached_message(msg_id, entity_id)
+        resolve_exc = None
         if not message:
             try:
                 self.log_info(f"[{task_id}] 缓存未命中，重新获取消息 entity={entity_id} msg={msg_id}")
                 message = self.resolve_message(entity_id, msg_id)
             except Exception as exc:
+                resolve_exc = exc
                 self.log_error(f"[{task_id}] 重新获取消息失败: {exc}")
                 message = None
-        return self.get_video_info(message) if message else None
+
+        video_info = self.get_video_info(message) if message else None
+        if video_info:
+            return video_info
+
+        # 如果任务本身在 state 中已有确定的元数据，使用已有信息作为 fallback，避免直接失败
+        state = self.copy_task_state(task_id) or {}
+        if state.get("filename") and (state.get("total_bytes") or state.get("size_bytes")):
+            total_size = int(state.get("total_bytes") or state.get("size_bytes") or 0)
+            return {
+                "filename": state["filename"],
+                "size": total_size,
+                "mime_type": "video/mp4",
+                "document_id": state.get("document_id"),
+            }
+
+        # 如果是因为网络异常重新获取消息失败且无 fallback，抛出具体网络错误
+        if resolve_exc is not None:
+            raise RuntimeError(f"获取 Telegram 消息失败 (网络连接异常): {resolve_exc}")
+
+        return None
 
     def _skip_existing(self, task_id, entity_id, msg_id, dialog_name, info, filepath):
         if not (os.path.exists(filepath) and os.path.getsize(filepath) == info["size"]):

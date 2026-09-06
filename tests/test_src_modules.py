@@ -418,6 +418,17 @@ class TestDownloadWorker:
         assert calls["released"]
         assert calls["processed"] == 1
 
+
+    def test_worker_fallback_info_when_resolve_fails_but_state_exists(self):
+        worker, states, _resumes, calls = self.make_worker(
+            resolve_message=Mock(side_effect=RuntimeError("connection dropped")),
+            copy_task_state=lambda _tid: {"filename": "saved.mp4", "total_bytes": 1000, "document_id": "doc123"},
+        )
+        # info is not provided in task, resolve_message fails, but copy_task_state has filename & total_bytes
+        info = worker._resolve_info({}, "t1", 1, 2)
+        assert info is not None
+        assert info["filename"] == "saved.mp4"
+        assert info["size"] == 1000
     def test_existing_file_is_skipped(self):
         with tempfile.TemporaryDirectory() as base:
             file_path = os.path.join(base, "video.mp4")

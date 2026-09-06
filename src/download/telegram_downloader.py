@@ -81,10 +81,20 @@ class TelegramDirectDownloader:
 
         retry_count = 0
         while True:
-            message = self.resolve_message(entity_id, msg_id, force_refresh=True)
+            try:
+                message = self.resolve_message(entity_id, msg_id, force_refresh=True)
+            except Exception as exc:
+                if retry_count < self.max_retry_attempts:
+                    retry_count += 1
+                    time.sleep(min(2 * retry_count, 10))
+                    continue
+                raise
             if not message or not getattr(getattr(message, "media", None), "document", None):
-                raise RuntimeError("消息不包含可下载视频")
-
+                if retry_count < self.max_retry_attempts:
+                    retry_count += 1
+                    time.sleep(min(2 * retry_count, 10))
+                    continue
+                raise RuntimeError("无法获取消息或消息不包含有效视频")
             start_offset = self.detect_resume_offset(task_id, filepath, total_bytes)
 
             async def _runner():
