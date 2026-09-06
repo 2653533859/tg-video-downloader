@@ -84,7 +84,13 @@ class RcloneUploader(UploaderBase):
             "--use-json-log",
             "--stats", "1s",
             "-v",
-            "--drive-chunk-size", "64M",
+            "--timeout", "30s",
+            "--contimeout", "15s",
+            "--low-speed-limit", "100k",
+            "--low-speed-time", "30s",
+            "--retries", "10",
+            "--retries-sleep", "2s",
+            "--drive-chunk-size", "32M",
         ]
         config_path = self.config.resolve_config_path()
         if config_path:
@@ -171,13 +177,27 @@ class RcloneUploader(UploaderBase):
         stderr_thread = threading.Thread(target=read_stderr, daemon=True)
         stderr_thread.start()
 
+        stall_timeout = 90.0
+        last_byte_change_time = time.time()
+        last_bytes = 0
+
         try:
             while process.poll() is None:
                 if is_cancelled and is_cancelled():
                     self._terminate_process(process)
                     return {"success": False, "error": "上传已取消", "cancelled": True}
-                time.sleep(0.5)
 
+                cur_bytes = last_progress.get("bytes", 0)
+                now = time.time()
+                if cur_bytes > last_bytes:
+                    last_bytes = cur_bytes
+                    last_byte_change_time = now
+                elif now - last_byte_change_time > stall_timeout:
+                    logger.warning(f"上传停滞超时 ({stall_timeout}s 无数据增长)，强制终止重试: {local_path}")
+                    self._terminate_process(process)
+                    return {"success": False, "error": f"上传连接停滞 ({int(stall_timeout)}秒无数据)，已自动切断"}
+
+                time.sleep(0.5)
             stderr_thread.join(timeout=3)
             returncode = process.returncode
 
