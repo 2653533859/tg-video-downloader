@@ -150,7 +150,12 @@ class TestRcloneUploader:
         dummy_file.write_text("dummy video content")
 
         mock_process = MagicMock()
-        mock_process.poll.side_effect = [None, None, 0]
+        poll_count = 0
+        def fake_poll():
+            nonlocal poll_count
+            poll_count += 1
+            return None if poll_count < 3 else 0
+        mock_process.poll.side_effect = fake_poll
         mock_process.returncode = 0
         stats_line = json.dumps({
             "stats": {"bytes": 100, "totalBytes": 100, "percentage": 100, "speed": 5000}

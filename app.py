@@ -152,6 +152,7 @@ relay_runtime = TelegramRuntime(relay_tg_client, relay_loop)
 shutdown_event = threading.Event()
 # Google Drive 上传管理器
 upload_manager = UploadManager()
+upload_manager.start()
 
 
 def get_upload_manager():

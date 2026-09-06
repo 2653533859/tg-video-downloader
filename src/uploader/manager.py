@@ -56,6 +56,8 @@ class UploadManager:
         # Restore any pending tasks from persistence upon startup
         self._restore_pending_tasks()
 
+        if self.config.enabled:
+            self.start()
     def start(self):
         """Start the background upload worker."""
         if self.config.enabled:
