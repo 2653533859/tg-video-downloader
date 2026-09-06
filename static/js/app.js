@@ -1263,7 +1263,8 @@ let currentEntity = null;
             },
           });
 
-          artplayerInstance.on('ready', () => {
+          function triggerAutoPlay() {
+            if (!artplayerInstance) return;
             try { artplayerInstance.loading.show = false; } catch (e) {}
             const playPromise = artplayerInstance.play();
             if (playPromise && playPromise.catch) {
@@ -1279,7 +1280,10 @@ let currentEntity = null;
                 } catch (e) {}
               });
             }
-          });
+          }
+
+          artplayerInstance.on('ready', triggerAutoPlay);
+          setTimeout(triggerAutoPlay, 80);
 
           artplayerInstance.on('video:loadedmetadata', () => {
             try { artplayerInstance.loading.show = false; } catch (e) {}
