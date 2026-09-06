@@ -1254,7 +1254,7 @@ let currentEntity = null;
             mutex: true,
             backdrop: true,
             playsInline: true,
-            autoPlayback: true,
+            autoPlayback: false,
             airplay: true,
             theme: '#7289da',
             moreVideoAttr: {
@@ -1262,8 +1262,21 @@ let currentEntity = null;
               playsInline: true,
             },
           });
+          artplayerInstance.on('video:loadedmetadata', () => {
+            try { artplayerInstance.loading.show = false; } catch (e) {}
+          });
+          artplayerInstance.on('video:canplay', () => {
+            try { artplayerInstance.loading.show = false; } catch (e) {}
+          });
+          artplayerInstance.on('video:waiting', () => {
+            try { artplayerInstance.loading.show = true; } catch (e) {}
+          });
+          artplayerInstance.on('video:playing', () => {
+            try { artplayerInstance.loading.show = false; } catch (e) {}
+          });
           artplayerInstance.on('video:error', (err) => {
             console.error('视频底层播放错误:', err);
+            try { artplayerInstance.loading.show = false; } catch (e) {}
           });
         } catch (err) {
           console.error('Artplayer 初始化异常:', err);
