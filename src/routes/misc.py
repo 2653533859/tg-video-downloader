@@ -152,6 +152,8 @@ def api_stream(filepath):
         block_reason = _download_file_play_block_reason(full_path, file_size)
         if block_reason:
             return jsonify({"error": block_reason}), 409
+        range_hdr = request.headers.get("Range")
+        print(f"[STREAM-REQ] Range: {range_hdr} | {os.path.basename(filepath)} ({file_size} B)", flush=True)
         mime_type = mimetypes.guess_type(full_path)[0] or 'video/mp4'
         resp = send_file(full_path, mimetype=mime_type, conditional=True, max_age=86400)
         resp.headers["Accept-Ranges"] = "bytes"
