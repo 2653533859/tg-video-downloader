@@ -1491,7 +1491,10 @@ let currentEntity = null;
               <div class="file-card-play-icon">▶</div>
             </div>
             <div class="file-card-body">
-              <span class="file-card-folder" title="${esc(f.folder)}">${esc(f.folder)}</span>
+              <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                <span class="file-card-folder" title="${esc(f.folder)}">${esc(f.folder)}</span>
+                <span class="file-size-tag">${esc(f.size)}</span>
+              </div>
               <div class="file-card-title" title="${esc(f.filename)}" onclick="previewFile('${esc(f.folder)}', '${esc(f.filename)}')">${esc(f.filename)}</div>
               <div class="file-card-meta">
                 <span>${esc(f.modified)}</span>
@@ -1548,6 +1551,7 @@ let currentEntity = null;
             <div class="file-info">
               <div class="file-meta-row">
                 <span class="file-folder-badge" title="${esc(f.folder)}">${esc(f.folder)}</span>
+                <span class="file-size-tag">${esc(f.size)}</span>
                 <span>${esc(f.modified)}</span>
                 ${!playable && playReason ? `<span style="color:#f39c12"> · 下载中</span>` : ''}
               </div>

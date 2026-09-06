@@ -891,15 +891,28 @@ body {
       font-size: 13px;
       font-weight: 500;
       color: #ddd;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
+      line-height: 1.45;
+      word-break: break-word;
+      overflow-wrap: anywhere;
       cursor: pointer;
       transition: color 0.15s;
     }
 
     .file-item .fname:hover {
       color: var(--accent);
+    }
+
+    .file-size-tag {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 600;
+      color: #4ecca3;
+      background: rgba(78, 204, 163, 0.12);
+      padding: 1px 7px;
+      border-radius: 6px;
+      border: 1px solid rgba(78, 204, 163, 0.25);
+      font-family: monospace, sans-serif;
+      white-space: nowrap;
     }
 
     .file-item .file-btns {
@@ -1506,20 +1519,18 @@ body {
   padding: 1px 6px;
   border-radius: 10px;
   align-self: flex-start;
-  max-width: 90%;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .file-card-title {
-  font-size: 12px;
+  font-size: 13px;
   color: #eee;
   font-weight: 500;
   line-height: 1.4;
   cursor: pointer;
+  word-break: break-word;
+  overflow-wrap: anywhere;
   display: -webkit-box;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
