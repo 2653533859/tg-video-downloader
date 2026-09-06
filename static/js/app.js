@@ -1212,31 +1212,74 @@ let currentEntity = null;
       openPreview('/api/stream/' + encodeURIComponent(folder) + '/' + encodeURIComponent(filename), filename);
     }
 
+    let artplayerInstance = null;
+
     function openPreview(url, title) {
       const modal = document.getElementById('previewModal');
-      const video = document.getElementById('previewVideo');
       const titleEl = document.getElementById('previewTitle');
-      video.dataset.closing = '';
-      video.onerror = () => {
-        if (video.dataset.closing === '1') return;
-        alert('视频无法播放，可能文件为 0B、格式不受浏览器支持，或文件仍未下载完整');
-      };
-      video.src = url;
-      titleEl.textContent = title;
-      modal.classList.remove('hidden');
+      if (titleEl) titleEl.textContent = title;
+      if (modal) modal.classList.remove('hidden');
+
+      if (artplayerInstance) {
+        try { artplayerInstance.destroy(false); } catch (e) {}
+        artplayerInstance = null;
+      }
+
+      const container = document.getElementById('artplayerContainer');
+      if (!container) return;
+      container.innerHTML = '';
+
+      if (window.Artplayer) {
+        try {
+          artplayerInstance = new Artplayer({
+            container: container,
+            url: url,
+            title: title,
+            volume: 0.7,
+            isLive: false,
+            muted: false,
+            autoplay: true,
+            pip: true,
+            autoSize: false,
+            autoMini: false,
+            screenshot: true,
+            setting: true,
+            loop: false,
+            flip: true,
+            playbackRate: true,
+            aspectRatio: true,
+            fullscreen: true,
+            fullscreenWeb: true,
+            miniProgressBar: true,
+            mutex: true,
+            backdrop: true,
+            playsInline: true,
+            autoPlayback: true,
+            airplay: true,
+            theme: '#7289da',
+            moreVideoAttr: {
+              crossOrigin: 'anonymous',
+            },
+          });
+        } catch (err) {
+          console.error('Artplayer 初始化异常:', err);
+          container.innerHTML = `<video src="${url}" controls autoplay style="width:100%;height:100%;object-fit:contain;"></video>`;
+        }
+      } else {
+        container.innerHTML = `<video src="${url}" controls autoplay style="width:100%;height:100%;object-fit:contain;"></video>`;
+      }
     }
 
     function closePreview(e) {
-      if (e && e.target !== e.currentTarget) return;
+      if (e && e.target && !e.target.classList.contains('modal-overlay') && !e.target.classList.contains('modal-close')) return;
       const modal = document.getElementById('previewModal');
-      const video = document.getElementById('previewVideo');
-      video.dataset.closing = '1';
-      video.onerror = null;
-      video.pause();
-      video.removeAttribute('src');
-      video.src = '';
-      video.load();
-      modal.classList.add('hidden');
+      if (modal) modal.classList.add('hidden');
+      if (artplayerInstance) {
+        try { artplayerInstance.destroy(false); } catch (err) {}
+        artplayerInstance = null;
+      }
+      const container = document.getElementById('artplayerContainer');
+      if (container) container.innerHTML = '';
     }
 
     document.addEventListener('keydown', e => { if (e.key === 'Escape') closePreview(); });
@@ -1307,41 +1350,170 @@ let currentEntity = null;
       });
     }
 
+    let cachedFilesData = [];
+    let cachedGDriveStatus = null;
+    let cachedFilesPayload = null;
+    let filesViewMode = localStorage.getItem('tg_files_view_mode') || 'grid';
+
+    function setFilesViewMode(mode) {
+      filesViewMode = mode;
+      localStorage.setItem('tg_files_view_mode', mode);
+      const btnGrid = document.getElementById('btnViewGrid');
+      const btnList = document.getElementById('btnViewList');
+      if (btnGrid && btnList) {
+        btnGrid.className = mode === 'grid' ? 'btn btn-sm' : 'btn btn-sm btn-outline';
+        btnList.className = mode === 'list' ? 'btn btn-sm' : 'btn btn-sm btn-outline';
+      }
+      renderFilesView();
+    }
+
+    function applyFilesFilter() {
+      renderFilesView();
+    }
+
+    function handlePosterHover(el, isEnter) {
+      const v = el.querySelector('video');
+      if (!v) return;
+      if (isEnter) {
+        v.play().catch(() => {});
+      } else {
+        v.pause();
+        try { v.currentTime = 1.0; } catch (e) {}
+      }
+    }
+
     function loadFiles(page = 1) {
       Promise.all([
         fetch('/api/files?page=' + encodeURIComponent(page) + '&per_page=100').then(r => r.json()).catch(() => ({ files: [] })),
         fetch('/api/gdrive/status').then(r => r.json()).catch(() => null),
       ]).then(([payload, gdriveStatus]) => {
-        const targetContainer = document.getElementById('tabFilesContent') || document.getElementById('tabFiles');
-        const data = Array.isArray(payload) ? payload : (payload.files || []);
+        cachedFilesPayload = payload;
+        cachedFilesData = Array.isArray(payload) ? payload : (payload.files || []);
+        cachedGDriveStatus = gdriveStatus;
         filesPage = Array.isArray(payload) ? 1 : (payload.page || 1);
 
         updateGDriveSummary(gdriveStatus);
 
-        const gdriveMap = {};
-        if (gdriveStatus) {
-          if (gdriveStatus.current) {
-            const cur = gdriveStatus.current;
-            gdriveMap[`${cur.folder}/${cur.filename}`] = cur;
-          }
-          (gdriveStatus.queue || []).forEach(t => {
-            gdriveMap[`${t.folder}/${t.filename}`] = t;
-          });
-          (gdriveStatus.recent || []).forEach(t => {
-            const k = `${t.folder}/${t.filename}`;
-            if (!gdriveMap[k]) gdriveMap[k] = t;
-          });
+        const btnGrid = document.getElementById('btnViewGrid');
+        const btnList = document.getElementById('btnViewList');
+        if (btnGrid && btnList) {
+          btnGrid.className = filesViewMode === 'grid' ? 'btn btn-sm' : 'btn btn-sm btn-outline';
+          btnList.className = filesViewMode === 'list' ? 'btn btn-sm' : 'btn btn-sm btn-outline';
         }
 
-        if (!data.length) { targetContainer.innerHTML = '<div class="empty">暂无已下载文件</div>'; return; }
-        let html = data.map(f => {
+        renderFilesView();
+
+        if (gdriveStatus && (gdriveStatus.current || (gdriveStatus.queue && gdriveStatus.queue.length > 0))) {
+          startGDrivePolling();
+        }
+      });
+    }
+
+    function renderFilesView() {
+      const targetContainer = document.getElementById('tabFilesContent') || document.getElementById('tabFiles');
+      if (!targetContainer) return;
+
+      const query = (document.getElementById('filesFilterInput')?.value || '').trim().toLowerCase();
+      const sort = document.getElementById('filesSortSelect')?.value || 'time_desc';
+
+      let items = [...cachedFilesData];
+
+      if (query) {
+        items = items.filter(f => (f.filename && f.filename.toLowerCase().includes(query)) || (f.folder && f.folder.toLowerCase().includes(query)));
+      }
+
+      if (sort === 'size_desc') {
+        items.sort((a, b) => (b.size_bytes || 0) - (a.size_bytes || 0));
+      } else if (sort === 'size_asc') {
+        items.sort((a, b) => (a.size_bytes || 0) - (b.size_bytes || 0));
+      } else if (sort === 'time_asc') {
+        items.sort((a, b) => (a.modified || '').localeCompare(b.modified || ''));
+      } else if (sort === 'name_asc') {
+        items.sort((a, b) => (a.filename || '').localeCompare(b.filename || ''));
+      }
+
+      const gdriveMap = {};
+      if (cachedGDriveStatus) {
+        if (cachedGDriveStatus.current) {
+          const cur = cachedGDriveStatus.current;
+          gdriveMap[`${cur.folder}/${cur.filename}`] = cur;
+        }
+        (cachedGDriveStatus.queue || []).forEach(t => {
+          gdriveMap[`${t.folder}/${t.filename}`] = t;
+        });
+        (cachedGDriveStatus.recent || []).forEach(t => {
+          const k = `${t.folder}/${t.filename}`;
+          if (!gdriveMap[k]) gdriveMap[k] = t;
+        });
+      }
+
+      if (!items.length) {
+        targetContainer.innerHTML = '<div class="empty">' + (query ? '未找到匹配的视频文件' : '暂无已下载文件') + '</div>';
+        return;
+      }
+
+      let bodyHtml = '';
+      if (filesViewMode === 'grid') {
+        bodyHtml = '<div class="files-grid">' + items.map(f => {
           const dlUrl = '/api/file/' + encodeURIComponent(f.folder) + '/' + encodeURIComponent(f.filename);
+          const streamUrl = '/api/stream/' + encodeURIComponent(f.folder) + '/' + encodeURIComponent(f.filename);
+          const playable = f.playable !== false;
+          const playReason = f.play_block_reason || '';
+
+          const fileKey = `${f.folder}/${f.filename}`;
+          const gTask = gdriveMap[fileKey];
+          let gdriveBtn = '';
+          if (gTask) {
+            if (gTask.status === 'uploading') {
+              const spd = gTask.speed ? ` · ${esc(gTask.speed)}` : '';
+              gdriveBtn = `<button type="button" class="btn-dl btn-gdrive" style="color:var(--accent)" disabled title="上传中">云盘 ${gTask.progress}%${spd}</button>`;
+            } else if (gTask.status === 'pending') {
+              gdriveBtn = `<button type="button" class="btn-dl btn-gdrive" style="color:#aaa" disabled title="排队中">云盘排队</button>`;
+            } else if (gTask.status === 'done') {
+              gdriveBtn = `<button type="button" class="btn-dl btn-gdrive" style="color:#4ecca3" disabled title="已保存到 Google 云盘">已存云盘 ✓</button>`;
+            } else if (gTask.status === 'error') {
+              gdriveBtn = `<button type="button" class="btn-dl btn-dl-danger btn-gdrive" onclick="retryGDriveUpload('${esc(gTask.upload_id)}')" title="${esc(gTask.error)}">重试云盘</button>`;
+            } else {
+              gdriveBtn = `<button type="button" class="btn-dl btn-gdrive" onclick="uploadToGDrive(this.closest('.file-card'))">存云盘</button>`;
+            }
+          } else {
+            gdriveBtn = `<button type="button" class="btn-dl btn-gdrive" onclick="uploadToGDrive(this.closest('.file-card'))">存云盘</button>`;
+          }
+
+          const playBtn = playable
+            ? `<button type="button" class="btn-dl" onclick="previewFile('${esc(f.folder)}', '${esc(f.filename)}')">播放</button>`
+            : `<button type="button" class="btn-dl" disabled title="${esc(playReason)}">下载中</button>`;
+
+          return `<div class="file-card" data-folder="${esc(f.folder)}" data-filename="${esc(f.filename)}">
+            <div class="file-card-poster" onclick="previewFile('${esc(f.folder)}', '${esc(f.filename)}')" onmouseenter="handlePosterHover(this, true)" onmouseleave="handlePosterHover(this, false)">
+              <video preload="metadata" muted playsinline loop src="${streamUrl}#t=1.0"></video>
+              <div class="file-card-badge">${esc(f.size)}</div>
+              <div class="file-card-play-icon">▶</div>
+            </div>
+            <div class="file-card-body">
+              <span class="file-card-folder" title="${esc(f.folder)}">${esc(f.folder)}</span>
+              <div class="file-card-title" title="${esc(f.filename)}" onclick="previewFile('${esc(f.folder)}', '${esc(f.filename)}')">${esc(f.filename)}</div>
+              <div class="file-card-meta">
+                <span>${esc(f.modified)}</span>
+                ${!playable && playReason ? `<span style="color:#f39c12">下载中</span>` : ''}
+              </div>
+            </div>
+            <div class="file-card-actions">
+              ${playBtn}
+              ${gdriveBtn}
+              <a class="btn-dl" href="${dlUrl}" download="${esc(f.filename)}">下载</a>
+              <button type="button" class="btn-dl" onclick="openFolder('${esc(f.folder)}')">目录</button>
+              <button type="button" class="btn-dl btn-dl-danger" onclick="deleteFile('${esc(f.folder)}', '${esc(f.filename)}')">删除</button>
+            </div>
+          </div>`;
+        }).join('') + '</div>';
+      } else {
+        bodyHtml = items.map(f => {
+          const dlUrl = '/api/file/' + encodeURIComponent(f.folder) + '/' + encodeURIComponent(f.filename);
+          const streamUrl = '/api/stream/' + encodeURIComponent(f.folder) + '/' + encodeURIComponent(f.filename);
           const playable = f.playable !== false;
           const playReason = f.play_block_reason || '';
           const statusText = !playable && playReason ? ` · ${esc(playReason)}` : '';
-          const playButton = playable
-            ? `<button type="button" class="btn-dl" onclick="previewFileFromItem(this.closest('.file-item'))">播放</button>`
-            : `<button type="button" class="btn-dl" disabled title="${esc(playReason)}">下载中</button>`;
 
           const fileKey = `${f.folder}/${f.filename}`;
           const gTask = gdriveMap[fileKey];
@@ -1363,34 +1535,40 @@ let currentEntity = null;
             gdriveBtn = `<button type="button" class="btn-dl btn-gdrive" onclick="uploadToGDrive(this.closest('.file-item'))">存云盘</button>`;
           }
 
-          return `<div class="file-item" data-folder="${esc(f.folder)}" data-filename="${esc(f.filename)}" data-playable="${playable ? '1' : '0'}" data-play-reason="${esc(playReason)}" oncontextmenu="showFileContextMenu(event,this)">
-        <div class="file-info">
-          <div class="fname" title="${esc(f.folder)}/${esc(f.filename)}" onclick="previewFileFromItem(this.closest('.file-item'))"><span class="folder">${esc(f.folder)}/</span> ${esc(f.filename)}</div>
-          <div class="meta">${f.size} · ${f.modified}${statusText}</div>
-        </div>
-        <div class="file-btns">
-          <button type="button" class="btn-dl" onclick="openFolderFromItem(this.closest('.file-item'))">目录</button>
-          ${playButton}
-          <a class="btn-dl" href="${dlUrl}" download="${esc(f.filename)}">下载</a>
-          ${gdriveBtn}
-          <button type="button" class="btn-dl btn-dl-danger" onclick="deleteFileFromItem(this.closest('.file-item'))">删除</button>
-        </div>
-      </div>`;
-        }).join('');
-        const pages = Array.isArray(payload) ? 1 : (payload.pages || 1);
-        const total = Array.isArray(payload) ? data.length : (payload.total || data.length);
-        if (pages > 1) {
-          html += `<div class="queue-summary" style="display:flex;justify-content:center;gap:10px;align-items:center;">
-            <button class="btn btn-sm btn-outline" ${filesPage <= 1 ? 'disabled' : ''} onclick="loadFiles(${filesPage - 1})">上一页</button>
-            <span>第 ${filesPage}/${pages} 页 · 共 ${total} 个文件</span>
-            <button class="btn btn-sm btn-outline" ${filesPage >= pages ? 'disabled' : ''} onclick="loadFiles(${filesPage + 1})">下一页</button>
+          const playBtn = playable
+            ? `<button type="button" class="btn-dl" onclick="previewFile('${esc(f.folder)}', '${esc(f.filename)}')">播放</button>`
+            : `<button type="button" class="btn-dl" disabled title="${esc(playReason)}">下载中</button>`;
+
+          return `<div class="file-item" data-folder="${esc(f.folder)}" data-filename="${esc(f.filename)}" data-playable="${playable ? '1' : '0'}" oncontextmenu="showFileContextMenu(event,this)">
+            <div class="file-item-thumb" onclick="previewFile('${esc(f.folder)}', '${esc(f.filename)}')">
+              <video preload="metadata" muted playsinline src="${streamUrl}#t=1.0"></video>
+            </div>
+            <div class="file-info" style="margin-left:8px;">
+              <div class="fname" title="${esc(f.folder)}/${esc(f.filename)}" onclick="previewFile('${esc(f.folder)}', '${esc(f.filename)}')"><span class="folder">${esc(f.folder)}/</span> ${esc(f.filename)}</div>
+              <div class="meta">${esc(f.size)} · ${esc(f.modified)}${statusText}</div>
+            </div>
+            <div class="file-btns">
+              <button type="button" class="btn-dl" onclick="openFolder('${esc(f.folder)}')">目录</button>
+              ${playBtn}
+              <a class="btn-dl" href="${dlUrl}" download="${esc(f.filename)}">下载</a>
+              ${gdriveBtn}
+              <button type="button" class="btn-dl btn-dl-danger" onclick="deleteFile('${esc(f.folder)}', '${esc(f.filename)}')">删除</button>
+            </div>
           </div>`;
-        }
-        targetContainer.innerHTML = html;
-        if (gdriveStatus && (gdriveStatus.current || (gdriveStatus.queue && gdriveStatus.queue.length > 0))) {
-          startGDrivePolling();
-        }
-      });
+        }).join('');
+      }
+
+      const pages = cachedFilesPayload && !Array.isArray(cachedFilesPayload) ? (cachedFilesPayload.pages || 1) : 1;
+      const total = cachedFilesPayload && !Array.isArray(cachedFilesPayload) ? (cachedFilesPayload.total || cachedFilesData.length) : cachedFilesData.length;
+      if (pages > 1) {
+        bodyHtml += `<div class="queue-summary" style="display:flex;justify-content:center;gap:10px;align-items:center;">
+          <button class="btn btn-sm btn-outline" ${filesPage <= 1 ? 'disabled' : ''} onclick="loadFiles(${filesPage - 1})">上一页</button>
+          <span>第 ${filesPage}/${pages} 页 · 共 ${total} 个文件</span>
+          <button class="btn btn-sm btn-outline" ${filesPage >= pages ? 'disabled' : ''} onclick="loadFiles(${filesPage + 1})">下一页</button>
+        </div>`;
+      }
+
+      targetContainer.innerHTML = bodyHtml;
     }
 
     let latestGDriveStatus = null;
@@ -1464,7 +1642,7 @@ let currentEntity = null;
         if (!gdriveMap[k]) gdriveMap[k] = t;
       });
 
-      document.querySelectorAll('#tabFiles .file-item').forEach(item => {
+      document.querySelectorAll('#tabFiles .file-item, #tabFiles .file-card').forEach(item => {
         const folder = item.dataset.folder || '';
         const filename = item.dataset.filename || '';
         const key = `${folder}/${filename}`;

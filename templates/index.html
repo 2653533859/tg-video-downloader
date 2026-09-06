@@ -136,6 +136,22 @@
           <button class="btn btn-sm btn-outline" id="gdriveLoginBtn" style="font-size:11px;padding:2px 8px;" onclick="openGDriveLogin()">云盘登录</button>
           <button class="btn btn-sm btn-outline" id="gdriveTestBtn" style="font-size:11px;padding:2px 8px;" onclick="testGDriveConnection()">测试连通</button>
         </div>
+        <div class="files-toolbar" style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:#101018;border-bottom:1px solid var(--border);">
+          <input type="text" id="filesFilterInput" placeholder="在已下载文件中快速筛选..." oninput="applyFilesFilter()"
+            style="flex:1;min-width:0;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:5px 10px;font-size:12px;">
+          <select id="filesSortSelect" onchange="applyFilesFilter()"
+            style="background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:4px 6px;font-size:12px;">
+            <option value="time_desc">最新下载</option>
+            <option value="time_asc">最早下载</option>
+            <option value="size_desc">体积最大</option>
+            <option value="size_asc">体积最小</option>
+            <option value="name_asc">文件名 A-Z</option>
+          </select>
+          <div class="view-switch-btns" style="display:flex;gap:4px;">
+            <button type="button" id="btnViewGrid" class="btn btn-sm" onclick="setFilesViewMode('grid')" title="海报卡片网格">🖼️ 网格</button>
+            <button type="button" id="btnViewList" class="btn btn-sm btn-outline" onclick="setFilesViewMode('list')" title="详细列表">📃 列表</button>
+          </div>
+        </div>
         <div id="tabFilesContent">
           <div class="loading">
             <div class="spinner"></div>加载中...
@@ -162,12 +178,12 @@
     </div>
   </div>
 
-  <!-- 视频预览弹窗 -->
+  <!-- 视频预览弹窗 (基于 ArtPlayer) -->
   <div class="modal-overlay hidden" id="previewModal" onclick="closePreview(event)">
-    <div class="modal-content">
+    <div class="modal-content" style="max-width:1040px;width:92vw;padding:0;background:transparent;border:none;box-shadow:none;">
       <button class="modal-close" onclick="closePreview()">&times;</button>
-      <video id="previewVideo" controls autoplay></video>
-      <div class="modal-title" id="previewTitle"></div>
+      <div id="artplayerContainer" style="width:100%;height:58vh;min-height:380px;max-height:82vh;border-radius:12px;overflow:hidden;box-shadow:0 16px 48px rgba(0,0,0,0.85);background:#000;"></div>
+      <div class="modal-title" id="previewTitle" style="padding:10px 4px;font-size:14px;color:#eee;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
     </div>
   </div>
 
@@ -261,6 +277,7 @@
     <button class="btn btn-sm btn-outline" onclick="clearVideoSelection()">取消选择</button>
   </div>
 
+  <script src="/static/js/artplayer.js"></script>
   <script defer src="/static/js/app.js"></script>
 </body>
 

@@ -1368,3 +1368,167 @@ body {
           box-shadow: 0 12px 28px rgba(0, 0, 0, 0.16);
         }
       }
+
+/* ==================== 已下载文件：媒体卡片网格与视图 ==================== */
+.files-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 14px;
+  padding: 12px;
+}
+
+.file-card {
+  background: #14141e;
+  border: 1px solid #232334;
+  border-radius: 10px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+  position: relative;
+}
+
+.file-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(114, 137, 218, 0.6);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+.file-card-poster {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #09090f;
+  cursor: pointer;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.file-card-poster video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+  background: #000;
+}
+
+.file-card-badge {
+  position: absolute;
+  bottom: 6px;
+  right: 6px;
+  background: rgba(0, 0, 0, 0.75);
+  color: #fff;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-family: monospace;
+  backdrop-filter: blur(4px);
+}
+
+.file-card-play-icon {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 40px;
+  height: 40px;
+  background: rgba(114, 137, 218, 0.85);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 16px;
+  opacity: 0.85;
+  transition: transform 0.2s, opacity 0.2s, background 0.2s;
+  pointer-events: none;
+}
+
+.file-card:hover .file-card-play-icon {
+  transform: translate(-50%, -50%) scale(1.15);
+  opacity: 1;
+  background: #7289da;
+}
+
+.file-card-body {
+  padding: 8px 10px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.file-card-folder {
+  display: inline-block;
+  font-size: 11px;
+  color: var(--accent);
+  background: rgba(114, 137, 218, 0.12);
+  padding: 1px 6px;
+  border-radius: 10px;
+  align-self: flex-start;
+  max-width: 90%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file-card-title {
+  font-size: 12px;
+  color: #eee;
+  font-weight: 500;
+  line-height: 1.4;
+  cursor: pointer;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.file-card-title:hover {
+  color: var(--accent);
+}
+
+.file-card-meta {
+  font-size: 11px;
+  color: #777;
+  display: flex;
+  justify-content: space-between;
+}
+
+.file-card-actions {
+  display: flex;
+  gap: 4px;
+  padding: 6px 10px 10px;
+  border-top: 1px solid #1a1a28;
+  flex-wrap: wrap;
+}
+
+.file-card-actions .btn-dl {
+  flex: 1;
+  min-width: 44px;
+  padding: 3px 6px;
+  font-size: 11px;
+  min-height: 26px;
+  text-align: center;
+}
+
+/* 列表视图中的微缩图 */
+.file-item-thumb {
+  width: 72px;
+  height: 42px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: #000;
+  flex-shrink: 0;
+  position: relative;
+  cursor: pointer;
+}
+
+.file-item-thumb video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+}
