@@ -152,9 +152,27 @@ def api_stream(filepath):
         block_reason = _download_file_play_block_reason(full_path, file_size)
         if block_reason:
             return jsonify({"error": block_reason}), 409
-        range_hdr = request.headers.get("Range")
-        print(f"[STREAM-REQ] Range: {range_hdr} | {os.path.basename(filepath)} ({file_size} B)", flush=True)
         mime_type = mimetypes.guess_type(full_path)[0] or 'video/mp4'
+        range_hdr = request.headers.get("Range")
+
+        # 核心优化：启用 4MB 动态步长流式分块，杜绝浏览器大范围请求被强行 Abort 的风暴
+        if range_hdr:
+            stream_range = local_stream_range(file_size, range_hdr, chunk_size=4 * 1024 * 1024)
+            resp = Response(
+                iter_file_chunks(full_path, stream_range["start"], stream_range["content_length"], chunk_size=262144),
+                status=206,
+                mimetype=mime_type,
+                direct_passthrough=True,
+            )
+            resp.headers["Content-Range"] = stream_range["content_range"]
+            resp.headers["Accept-Ranges"] = "bytes"
+            resp.headers["Content-Length"] = str(stream_range["content_length"])
+            resp.headers["Cache-Control"] = "public, max-age=86400"
+            resp.headers["Access-Control-Allow-Origin"] = "*"
+            resp.headers["Access-Control-Allow-Headers"] = "Range, Authorization, Content-Type"
+            resp.headers["Access-Control-Expose-Headers"] = "Content-Range, Accept-Ranges, Content-Length"
+            return resp
+
         resp = send_file(full_path, mimetype=mime_type, conditional=True, max_age=86400)
         resp.headers["Accept-Ranges"] = "bytes"
         resp.headers["Access-Control-Allow-Origin"] = "*"
