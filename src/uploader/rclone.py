@@ -86,8 +86,6 @@ class RcloneUploader(UploaderBase):
             "-v",
             "--timeout", "30s",
             "--contimeout", "15s",
-            "--low-speed-limit", "100k",
-            "--low-speed-time", "30s",
             "--retries", "10",
             "--retries-sleep", "2s",
             "--drive-chunk-size", "32M",
