@@ -221,6 +221,7 @@ class UploadManager:
 
         return {
             "enabled": self.config.enabled,
+            "configured": self.auth.get_info().get("configured", False),
             "auto_upload": self.config.auto_upload,
             "remote": self.config.remote_name,
             "target_dir": self.config.target_dir,

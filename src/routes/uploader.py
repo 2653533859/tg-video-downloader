@@ -38,6 +38,9 @@ def api_gdrive_upload():
     if _upload_manager is None:
         return jsonify({"error": "UploadManager 未初始化"}), 500
 
+    if not _upload_manager.auth.get_info().get("configured"):
+        return jsonify({"error": "尚未绑定 Google 云盘，请先在上方点击【云盘登录】完成授权绑定"}), 400
+
     data = request.json or {}
     folder = data.get("folder", "").strip()
     filename = data.get("filename", "").strip()

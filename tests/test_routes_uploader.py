@@ -11,8 +11,8 @@ from src.routes.uploader import bp as uploader_bp, init_blueprint
 def client():
     app = Flask(__name__)
     mock_upload_manager = Mock()
+    mock_upload_manager.auth.get_info.return_value = {"configured": True}
     mock_resolve_path = Mock()
-
     init_blueprint({
         "upload_manager": mock_upload_manager,
         "resolve_download_path": mock_resolve_path,
@@ -44,6 +44,12 @@ def test_upload_missing_parameters(client):
     assert res.status_code == 400
     assert "缺少 folder 或 filename" in res.get_json()["error"]
 
+
+def test_upload_unconfigured_error(client):
+    client.mock_upload_manager.auth.get_info.return_value = {"configured": False}
+    res = client.post("/api/gdrive/upload", json={"folder": "ch", "filename": "v.mp4"})
+    assert res.status_code == 400
+    assert "尚未绑定 Google 云盘" in res.get_json()["error"]
 
 def test_upload_file_not_found(client):
     client.mock_resolve_path.side_effect = FileNotFoundError("文件未找到")

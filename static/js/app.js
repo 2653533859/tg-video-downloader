@@ -1385,9 +1385,11 @@ let currentEntity = null;
       });
     }
 
+    let latestGDriveStatus = null;
+
     function updateGDriveSummary(status) {
+      latestGDriveStatus = status;
       const el = document.getElementById('gdriveStatusText');
-      if (!el) return;
       if (!status) {
         el.textContent = 'Google 云盘：未连接';
         return;
@@ -1412,6 +1414,11 @@ let currentEntity = null;
     function uploadToGDrive(item) {
       const { folder, filename } = fileDataFromItem(item);
       if (!folder || !filename) return;
+      if (latestGDriveStatus && !latestGDriveStatus.configured) {
+        alert('当前尚未绑定 Google 云盘账号，请先在上方完成登录绑定');
+        openGDriveLogin();
+        return;
+      }
       fetch('/api/gdrive/upload', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1419,6 +1426,9 @@ let currentEntity = null;
       }).then(r => r.json()).then(res => {
         if (!res.ok) {
           alert(res.error || '加入上传队列失败');
+          if (res.error && res.error.includes('尚未绑定')) {
+            openGDriveLogin();
+          }
         } else {
           loadFiles(filesPage);
         }
