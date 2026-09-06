@@ -5,6 +5,26 @@ import subprocess
 import sys
 from datetime import datetime
 
+ALLOWED_VIDEO_EXTS = frozenset({
+    ".mp4", ".mkv", ".mov", ".webm", ".avi",
+    ".flv", ".ts", ".m4v", ".wmv", ".3gp",
+})
+
+
+def is_valid_downloaded_video(filename: str, size_bytes: int) -> bool:
+    """Check if file is a valid, completed downloaded video."""
+    if not filename or filename.startswith("."):
+        return False
+    if filename.endswith(".tmp") or filename.endswith(".part") or filename.endswith(".aria2"):
+        return False
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in ALLOWED_VIDEO_EXTS:
+        return False
+    if size_bytes <= 0:
+        return False
+    return True
+
+
 
 def list_download_files(download_dir, format_size, page=1, per_page=100):
     page = max(int(page or 1), 1)
@@ -25,18 +45,23 @@ def list_download_files(download_dir, format_size, page=1, per_page=100):
         if not os.path.isdir(folder_path):
             continue
         for filename in sorted(os.listdir(folder_path)):
+            if filename.startswith("."):
+                continue
             file_path = os.path.join(folder_path, filename)
-            if os.path.isfile(file_path):
-                modified_ts = os.path.getmtime(file_path)
-                size_bytes = os.path.getsize(file_path)
-                files.append({
-                    "folder": folder,
-                    "filename": filename,
-                    "size": format_size(size_bytes),
-                    "size_bytes": size_bytes,
-                    "modified": datetime.fromtimestamp(modified_ts).strftime("%Y-%m-%d %H:%M"),
-                    "modified_ts": modified_ts,
-                })
+            if not os.path.isfile(file_path):
+                continue
+            size_bytes = os.path.getsize(file_path)
+            if not is_valid_downloaded_video(filename, size_bytes):
+                continue
+            modified_ts = os.path.getmtime(file_path)
+            files.append({
+                "folder": folder,
+                "filename": filename,
+                "size": format_size(size_bytes),
+                "size_bytes": size_bytes,
+                "modified": datetime.fromtimestamp(modified_ts).strftime("%Y-%m-%d %H:%M"),
+                "modified_ts": modified_ts,
+            })
 
     files.sort(key=lambda item: item["modified_ts"], reverse=True)
     total = len(files)

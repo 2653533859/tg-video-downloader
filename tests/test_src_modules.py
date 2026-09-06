@@ -846,6 +846,11 @@ class TestFileService:
             file_path = os.path.join(base, "chat", "video.mp4")
             with open(file_path, "wb") as handle:
                 handle.write(b"abc")
+            # 杂质文件：应被自动过滤，不计入视频列表
+            with open(os.path.join(base, "chat", "meta.json"), "wb") as h: h.write(b"{}")
+            with open(os.path.join(base, "chat", "._video.mp4"), "wb") as h: h.write(b"apple")
+            with open(os.path.join(base, "chat", "zero.mp4"), "wb") as h: pass
+            with open(os.path.join(base, "chat", "temp.mp4.tmp"), "wb") as h: h.write(b"123")
 
             payload = list_download_files(base, lambda size: f"{size}B", page=1, per_page=10)
             assert payload["total"] == 1
