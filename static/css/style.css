@@ -870,7 +870,7 @@ body {
       aspect-ratio: 16 / 9;
       border-radius: 6px;
       overflow: hidden;
-      background: #09090f;
+      background: radial-gradient(circle at center, #1b1b2a 0%, #0a0a14 100%);
       flex-shrink: 0;
       position: relative;
       cursor: pointer;
@@ -1504,7 +1504,7 @@ body {
   position: relative;
   width: 100%;
   aspect-ratio: 16 / 9;
-  background: #09090f;
+  background: radial-gradient(circle at center, #1e1e30 0%, #0c0c16 100%);
   cursor: pointer;
   overflow: hidden;
   display: flex;

@@ -1379,10 +1379,14 @@ let currentEntity = null;
       const v = el.querySelector('video');
       if (!v) return;
       if (isEnter) {
+        if (!v.src && v.dataset.src) {
+          v.src = v.dataset.src;
+        }
         v.play().catch(() => {});
       } else {
         v.pause();
-        try { v.currentTime = 1.0; } catch (e) {}
+        v.removeAttribute('src');
+        v.load();
       }
     }
 
@@ -1490,7 +1494,7 @@ let currentEntity = null;
 
           return `<div class="file-card" data-folder="${esc(f.folder)}" data-filename="${esc(f.filename)}">
             <div class="file-card-poster" onclick="previewFile('${esc(f.folder)}', '${esc(f.filename)}')" onmouseenter="handlePosterHover(this, true)" onmouseleave="handlePosterHover(this, false)">
-              <video preload="metadata" muted playsinline loop src="${streamUrl}#t=1.0"></video>
+              <video preload="none" muted playsinline loop data-src="${streamUrl}#t=1.0"></video>
               <div class="file-card-badge">${esc(f.size)}</div>
               <div class="file-card-play-icon">▶</div>
             </div>
@@ -1549,7 +1553,7 @@ let currentEntity = null;
           return `<div class="file-item" data-folder="${esc(f.folder)}" data-filename="${esc(f.filename)}" data-playable="${playable ? '1' : '0'}" oncontextmenu="showFileContextMenu(event,this)">
             <div class="file-item-top">
               <div class="file-item-thumb" onclick="previewFile('${esc(f.folder)}', '${esc(f.filename)}')" onmouseenter="handlePosterHover(this, true)" onmouseleave="handlePosterHover(this, false)">
-                <video preload="metadata" muted playsinline loop src="${streamUrl}#t=1.0"></video>
+                <video preload="none" muted playsinline loop data-src="${streamUrl}#t=1.0"></video>
                 <div class="file-item-play-overlay">▶</div>
                 <div class="file-item-size-badge">${esc(f.size)}</div>
               </div>

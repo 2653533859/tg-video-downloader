@@ -153,7 +153,7 @@ def api_stream(filepath):
         if block_reason:
             return jsonify({"error": block_reason}), 409
         mime_type = mimetypes.guess_type(full_path)[0] or 'video/mp4'
-        resp = send_file(full_path, mimetype=mime_type, conditional=True)
+        resp = send_file(full_path, mimetype=mime_type, conditional=True, max_age=86400)
         resp.headers["Accept-Ranges"] = "bytes"
         resp.headers["Access-Control-Allow-Origin"] = "*"
         resp.headers["Access-Control-Allow-Headers"] = "Range, Authorization, Content-Type"
