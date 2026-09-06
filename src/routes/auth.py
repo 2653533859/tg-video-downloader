@@ -13,7 +13,7 @@ from flask import (
     session,
 )
 
-from src.security.access import request_ip_is_local, verify_basic_auth
+from src.security.access import is_local_bind_only, request_ip_is_local, verify_basic_auth
 
 bp = Blueprint("auth", __name__)
 
@@ -22,18 +22,19 @@ bp = Blueprint("auth", __name__)
 _expected_username = ""
 _expected_password = ""
 _trust_forwarded = False
+_bind_host = ""
 
 
 def init_blueprint(deps):
     """初始化 Blueprint 依赖（单一 deps 映射注入）。
 
-    keys: auth_username, auth_password, trust_forwarded
+    keys: auth_username, auth_password, trust_forwarded, bind_host
     """
-    global _expected_username, _expected_password, _trust_forwarded
+    global _expected_username, _expected_password, _trust_forwarded, _bind_host
     _expected_username = deps["auth_username"]
     _expected_password = deps["auth_password"]
     _trust_forwarded = deps.get("trust_forwarded", False)
-
+    _bind_host = deps.get("bind_host", "127.0.0.1")
 
 def _request_is_local():
     return request_ip_is_local(
@@ -51,10 +52,9 @@ def _auth_required():
 def _is_authed():
     if not _auth_required():
         return True
-    if _request_is_local():
+    if _request_is_local() and is_local_bind_only(_bind_host):
         return True
     return bool(session.get("authed"))
-
 
 @bp.route("/login", methods=["GET"])
 def login_page():

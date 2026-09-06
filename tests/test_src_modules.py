@@ -1145,6 +1145,28 @@ class TestWebSessionAuth:
         assert resp.status_code == 200
         assert b"password" in resp.data
 
+    def test_login_page_renders_when_bind_host_is_all_interfaces(self):
+        """当服务绑定 0.0.0.0 时（如反向代理/Cloudflare Tunnel），即使本地 127.0.0.1 访问，也必须渲染登录页而非 302 死循环跳回 /。"""
+        import os
+        from flask import Flask
+        from src.routes import auth
+
+        auth.init_blueprint({
+            "auth_username": "u",
+            "auth_password": "p",
+            "trust_forwarded": False,
+            "bind_host": "0.0.0.0",
+        })
+        templates = os.path.join(os.path.dirname(__file__), "..", "templates")
+        app = Flask(__name__, template_folder=templates)
+        app.secret_key = "test-secret"
+        app.register_blueprint(auth.bp)
+        client = app.test_client()
+
+        resp = client.get("/login", environ_base={"REMOTE_ADDR": "127.0.0.1"})
+        assert resp.status_code == 200
+        assert b"password" in resp.data
+
 
 class TestEnforceAccessControl:
     """app_new.enforce_access_control 四路放行（本地/会话/Basic/未认证）。"""

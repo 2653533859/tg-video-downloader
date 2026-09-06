@@ -85,6 +85,7 @@ def init_all_blueprints():
         "auth_username": WEB_AUTH_USERNAME,
         "auth_password": WEB_AUTH_PASSWORD,
         "trust_forwarded": TRUST_FORWARDED_FOR,
+        "bind_host": WEB_BIND_HOST,
     })
 
     files.init_blueprint({
