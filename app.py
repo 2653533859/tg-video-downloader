@@ -242,6 +242,11 @@ def _mark_tg_reconnected():
     tg_connected = True
 
 
+def _is_any_download_active():
+    with status_lock:
+        return any(t.get("status") == "downloading" for t in download_status.values())
+
+
 def init_tg_health_checker():
     """初始化 Telegram 健康检查器"""
     global tg_health_checker
@@ -256,6 +261,7 @@ def init_tg_health_checker():
             log_warning=log_warning,
             log_error=log_error,
             reconnect_lock=tg_runtime.client_reconnect_lock,
+            is_busy_func=_is_any_download_active,
         )
         tg_health_checker.start()
 
@@ -590,6 +596,13 @@ def _should_retry_telegram_download_error(error_message):
         "eof",
         "temporarily",
         "server closed",
+        "readexactly",
+        "receive loop",
+        "coroutine",
+        "streamreader",
+        "unhandled error",
+        "broken pipe",
+        "socket",
         "停滞",
         "超时",
         "连接",

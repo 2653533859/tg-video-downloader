@@ -190,6 +190,10 @@ class TelegramDirectDownloader:
                     f"（第 {retry_count} 次，已保留 {self.format_size(current_size)}）: {exc}"
                 )
                 time.sleep(min(2 * retry_count, 20))
+                try:
+                    self.ensure_connection(allow_reconnect=True)
+                except Exception as conn_err:
+                    self.log_warning(f"[{task_id}] 续传前确保连接提示: {conn_err}")
 
         completion_error = self.validate_completion(total_bytes=total_bytes, final_size=final_size)
         if completion_error:

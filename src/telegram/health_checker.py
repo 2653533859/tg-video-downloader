@@ -28,6 +28,7 @@ class TelegramHealthChecker:
         log_warning: Optional[Callable[[str], None]] = None,
         log_error: Optional[Callable[[str], None]] = None,
         reconnect_lock=None,
+        is_busy_func: Optional[Callable[[], bool]] = None,
     ):
         """
         初始化健康检查器
@@ -47,10 +48,10 @@ class TelegramHealthChecker:
         self.max_retry = max_retry
         self.on_reconnect_callback = on_reconnect_callback
         self._reconnect_lock = reconnect_lock
+        self._is_busy_func = is_busy_func
         self._log_info = log_info or logger.info
         self._log_warning = log_warning or logger.warning
         self._log_error = log_error or logger.error
-
         self._running = False
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
@@ -117,10 +118,17 @@ class TelegramHealthChecker:
     async def _async_check(self):
         """异步健康检查（轻量级操作）"""
         try:
+            if self._is_busy_func:
+                try:
+                    if self._is_busy_func():
+                        # 下载正在活跃进行，socket 本身处于密集数据流中，直接视为健康，免打扰避免触发 readexactly 冲突
+                        return True
+                except Exception:
+                    pass
+
             if not self.client.is_connected():
                 self._log_warning("[tg-health] 客户端未连接")
                 return False
-
             try:
                 from telethon.tl.functions import PingRequest
                 await asyncio.wait_for(
