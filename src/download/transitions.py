@@ -17,7 +17,7 @@ _ALLOWED = {
     "submitting": frozenset({"queued", "downloading", "paused", "done", "skipped", "error", "cancelled"}),
     "queued": frozenset({"submitting", "downloading", "paused", "done", "skipped", "error", "cancelled"}),
     "downloading": frozenset({"paused", "done", "skipped", "error", "cancelled"}),
-    "paused": frozenset({"queued", "downloading", "done", "skipped", "error", "cancelled"}),
+    "paused": frozenset({"submitting", "queued", "downloading", "done", "skipped", "error", "cancelled"}),
     # 终态默认不可迁出（复活走 allow_revive 分支）
     "done": frozenset(),
     "skipped": frozenset(),

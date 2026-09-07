@@ -27,6 +27,8 @@ class TestCanTransition:
         assert can_transition("downloading", "done") is True
         assert can_transition("downloading", "paused") is True
         assert can_transition("paused", "downloading") is True
+        assert can_transition("paused", "submitting") is True
+        assert can_transition("paused", "queued") is True
 
     def test_downloading_to_error_allowed(self):
         # watchdog 对进行中的任务标记 error 是合法的

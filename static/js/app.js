@@ -902,7 +902,12 @@ let currentEntity = null;
         .catch(err => alert(err?.message || '继续失败，请稍后再试'));
     }
 
-    function queueAction(taskId, action) {
+    function queueAction(taskId, action, btnEl) {
+      if (btnEl) {
+        btnEl.disabled = true;
+        btnEl.dataset.originText = btnEl.textContent;
+        btnEl.textContent = '处理中...';
+      }
       return fetch('/api/queue_action', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ task_id: taskId, action })
@@ -912,6 +917,14 @@ let currentEntity = null;
         restoreDownloadTasks();
         startProgressPolling();
         return payload;
+      }).catch(err => {
+        console.error('queueAction failed:', err);
+        alert(err.message || '操作失败');
+        if (btnEl) {
+          btnEl.disabled = false;
+          btnEl.textContent = btnEl.dataset.originText || '继续';
+        }
+        restoreDownloadTasks();
       });
     }
 
@@ -1024,7 +1037,7 @@ let currentEntity = null;
       } else if (info.status === 'paused') {
         pctEl.textContent = '已暂停';
         spdEl.textContent = '';
-        if (actEl) actEl.innerHTML = `<button class=\"btn-sm btn-retry\" onclick=\"queueAction('${taskId}','resume')\">继续</button><button class=\"btn-sm btn-danger\" onclick=\"queueAction('${taskId}','delete')\">删除</button>`;
+        if (actEl) actEl.innerHTML = `<button class="btn-sm btn-retry" onclick="queueAction('${taskId}','resume',this)">继续</button><button class="btn-sm btn-danger" onclick="queueAction('${taskId}','delete',this)">删除</button>`;
       } else if (info.status === 'queued') {
         const pos = info.queue_position ? ` (#${info.queue_position})` : '';
         pctEl.textContent = '排队中' + pos;

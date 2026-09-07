@@ -703,9 +703,10 @@ def _resume_task(task_id, dialog_name=None, auto=False):
             msg = _resolve_message(entity_id, msg_id)
         info = get_video_info(msg) if msg else None
     except Exception as exc:
-        if not auto:
+        has_fallback = bool(stored.get("filename") or resume_info.get("filename"))
+        if not auto and not has_fallback:
             raise
-        log_warning(f"[{task_id}] 自动恢复时刷新消息失败，将入队后重试: {exc}")
+        log_warning(f"[{task_id}] 恢复任务时刷新消息异常，使用已有元数据入队: {exc}")
 
     fname = (info or {}).get("filename") or resume_info.get("filename") or stored.get("filename") or "unknown"
     total_bytes = (info or {}).get("size") or int(resume_info.get("total") or stored.get("total_bytes") or 0)
